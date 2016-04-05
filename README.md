@@ -29,6 +29,7 @@ This a sub-repo of [Neard project](https://github.com/crazy-max/neard) involving
 | ---------------------|:------------------------:|:-----------------------:|:-------------:|:--------:|
 | **phpMyAdmin 4.0.4** | N/A | 2013/06/17 | [r1](https://github.com/crazy-max/neard-app-phpmyadmin/releases/tag/r1) | [neard-phpmyadmin-4.0.4-r1.zip](https://github.com/crazy-max/neard-app-phpmyadmin/releases/download/r1/neard-phpmyadmin-4.0.4-r1.zip) |
 | **phpMyAdmin 4p1** ![](https://raw.github.com/crazy-max/neard-app-phpmyadmin/master/img/star-20160403.png) | 4.0.10.12<br />4.4.15.2<br />4.5.3.1 | 2015/12/25<br />2015/12/25<br />2015/12/25 | [r2](https://github.com/crazy-max/neard-app-phpmyadmin/releases/tag/r2) | [neard-phpmyadmin-4p1-r2.zip](https://github.com/crazy-max/neard-app-phpmyadmin/releases/download/r2/neard-phpmyadmin-4p1-r2.zip) |
+| **phpMyAdmin 4p2** | 4.0.10.15<br />4.4.15.5<br />4.6.0 | 2016/02/29<br />2016/02/29<br />2016/03/17 | [r3](https://github.com/crazy-max/neard-app-phpmyadmin/releases/tag/r3) | [neard-phpmyadmin-4p2-r3.zip](https://github.com/crazy-max/neard-app-phpmyadmin/releases/download/r3/neard-phpmyadmin-4p2-r3.zip) |
 
 ## Issues
 

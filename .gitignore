@@ -1,0 +1,13 @@
+# Eclipse
+.settings
+.buildpath
+.project
+.jsdtscope
+*.launch
+
+# Ant
+build.properties
+build.xml
+
+# Neard
+.dev

@@ -21,6 +21,30 @@ This a sub-repo of [Neard project](https://github.com/crazy-max/neard) involving
 * Edit the `alias/phpmyadmin.conf` file and replace the lines with the correct version. (Not necessary since Neard 1.0.18)
 * Start Neard.
 
+## Sources
+
+* https://www.phpmyadmin.net/
+
+## Contribute
+
+If you want to contribute to this bundle and create new bundles, you have to download [neard-dev](https://github.com/crazy-max/neard-dev) in the parent folder of the bundle.
+Directory structure example :
+
+```
+[-] neard-dev
+ | [-] build
+ |  |  | build-commons.xml 
+[-] neard-app-phpmyadmin
+ |  | build.xml
+```
+
+To create a new bundle :
+* Do not forget to increment the `build.release` in the `build.properties` file.
+* If you want you can change the `build.path` (default `C:\neard-build`).
+* Open a command prompt in your bundle folder and call the Ant target `release` : `ant release`.
+* Upload your release on a file hosting system like [Sendspace](https://www.sendspace.com/).
+* Create an [issue on Neard repository](https://github.com/crazy-max/neard/issues) to integrate your release.
+
 ## Download
 
 ![](https://raw.github.com/crazy-max/neard-app-phpmyadmin/master/img/star-20160403.png) : Default bundle on Neard.

@@ -1,6 +1,6 @@
 This a sub-repo of [Neard project](https://github.com/crazy-max/neard) involving phpMyAdmin app bundles.
 
-## Download and installation
+## Documentation and downloads
 
 See [phpMyAdmin Wiki page on Neard](https://github.com/crazy-max/neard/wiki/appPhpMyAdmin).
 

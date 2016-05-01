@@ -7,6 +7,7 @@ See [phpMyAdmin Wiki page on Neard](https://github.com/crazy-max/neard/wiki/appP
 ## Sources
 
 * https://www.phpmyadmin.net/
+* https://github.com/phpmyadmin/phpmyadmin
 
 ## Issues
 

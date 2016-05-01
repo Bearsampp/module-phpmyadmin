@@ -1,5 +1,12 @@
 # Changelog
 
+## r4 (2016/04/30)
+
+This release works since **[Neard 1.0.18](https://github.com/crazy-max/neard/releases/tag/v1.0.18)**
+
+* Change auth method to cookie (default user is `root` and empty password)
+* Use `127.0.0.1` instead of `localhost` for performance
+
 ## r3 (2016/04/05)
 
 This release works since **[Neard 1.0.18](https://github.com/crazy-max/neard/releases/tag/v1.0.18)**

@@ -21,7 +21,11 @@ $cfg['blowfish_secret'] = 'a8b7c6d'; /* YOU MUST FILL IN THIS FOR COOKIE AUTH! *
  */
 $i = 0;
 $mysqlPort = 3306;
+$mysqlRootUser = 'root';
+$mysqlRootPwd = '';
 $mariadbPort = 3307;
+$mariadbRootUser = 'root';
+$mariadbRootPwd = '';
 
 /**
  * MySQL server
@@ -30,10 +34,10 @@ $i++;
 
 $cfg['Servers'][$i]['verbose'] = 'MySQL port ' . $mysqlPort;
 $cfg['Servers'][$i]['port'] = $mysqlPort;
-$cfg['Servers'][$i]['user'] = 'root';
-$cfg['Servers'][$i]['password'] = '';
-$cfg['Servers'][$i]['auth_type'] = 'config';
-$cfg['Servers'][$i]['host'] = 'localhost';
+$cfg['Servers'][$i]['user'] = $mysqlRootUser;
+$cfg['Servers'][$i]['password'] = $mysqlRootPwd;
+$cfg['Servers'][$i]['auth_type'] = 'cookie';
+$cfg['Servers'][$i]['host'] = '127.0.0.1';
 $cfg['Servers'][$i]['connect_type'] = 'tcp';
 $cfg['Servers'][$i]['compress'] = false;
 $cfg['Servers'][$i]['extension'] = 'mysqli';
@@ -46,10 +50,10 @@ $i++;
 
 $cfg['Servers'][$i]['verbose'] = 'MariaDB port ' . $mariadbPort;
 $cfg['Servers'][$i]['port'] = $mariadbPort;
-$cfg['Servers'][$i]['user'] = 'root';
-$cfg['Servers'][$i]['password'] = '';
-$cfg['Servers'][$i]['auth_type'] = 'config';
-$cfg['Servers'][$i]['host'] = 'localhost';
+$cfg['Servers'][$i]['user'] = $mariadbRootUser;
+$cfg['Servers'][$i]['password'] = $mariadbRootPwd;
+$cfg['Servers'][$i]['auth_type'] = 'cookie';
+$cfg['Servers'][$i]['host'] = '127.0.0.1';
 $cfg['Servers'][$i]['connect_type'] = 'tcp';
 $cfg['Servers'][$i]['compress'] = false;
 $cfg['Servers'][$i]['extension'] = 'mysqli';

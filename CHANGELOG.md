@@ -2,6 +2,10 @@
 
 ### [Check compatibility with Neard](https://github.com/crazy-max/neard/wiki/appPhpMyAdmin#latest) before downloading.
 
+## r5 (2016/06/21)
+
+* New bundle pack p3 4.0.10.15 / 4.4.15.6 / 4.6.2
+
 ## r4 (2016/04/30)
 
 * Change auth method to cookie (default user is `root` and empty password)

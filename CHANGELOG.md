@@ -2,6 +2,10 @@
 
 ### [Check compatibility with Neard](https://github.com/crazy-max/neard/wiki/appPhpMyAdmin#latest) before downloading.
 
+## r6 (2016/10/07)
+
+* New bundle pack p4 4.0.10.17 / 4.4.15.8 / 4.6.4
+
 ## r5 (2016/06/21)
 
 * New bundle pack p3 4.0.10.15 / 4.4.15.6 / 4.6.2

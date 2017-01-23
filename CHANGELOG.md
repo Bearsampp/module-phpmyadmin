@@ -1,7 +1,5 @@
 # Changelog
 
-### [Check compatibility with Neard](https://github.com/crazy-max/neard/wiki/appPhpMyAdmin#latest) before downloading.
-
 ## r6 (2016/10/07)
 
 * New bundle pack p4 4.0.10.17 / 4.4.15.8 / 4.6.4
@@ -25,4 +23,4 @@
 
 ## r1 (2016/04/05)
 
-* Init repo with phpMyAdmin bundles from [Neard](https://github.com/crazy-max/neard)
+* Init repo with phpMyAdmin bundles from Neard

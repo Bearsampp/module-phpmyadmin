@@ -1,19 +1,83 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project name="neard-app-phpmyadmin" basedir=".">
+  
+  <dirname property="project.basedir" file="${ant.file.neard-app-phpmyadmin}"/>
+  <property name="root.dir" location="${project.basedir}/.."/>
+  <property name="build.properties" value="${project.basedir}/build.properties"/>
+  <property file="${build.properties}"/>
+  
+  <!-- Neard dev -->
+  <property name="neard-dev.path" location="${root.dir}/neard-dev"/>
+  <fail unless="neard-dev.path" message="Project 'neard-dev' not found in ${neard-dev.path}"/>
+  <echo message="Neard dev found in ${neard-dev.path}" level="debug"/> 
+  
+  <!-- Import build-commons.xml -->
+  <import file="${neard-dev.path}/build/build-commons.xml"/>
+  <!-- Import build-bundle.xml -->
+  <import file="${neard-dev.path}/build/build-bundle.xml"/>
+  
+  <target name="release.build">
+    <basename property="bundle.folder" file="${bundle.path}"/>
+    <replaceproperty src="bundle.folder" dest="bundle.version" replace="${bundle.name}" with=""/>
     
-    <dirname property="project.basedir" file="${ant.file.neard-app-phpmyadmin}" />
-    <property name="root.dir" location="${project.basedir}/.." />
-    <property name="build.properties" value="${project.basedir}/build.properties" />
-    <property file="${build.properties}" />
+    <delete dir="${bundle.tmp.prep.path}/${bundle.folder}"/>
+    <mkdir dir="${bundle.tmp.prep.path}/${bundle.folder}"/>
     
-    <!-- Neard dev -->
-    <property name="neard-dev.path" location="${root.dir}/neard-dev" />
-    <fail unless="neard-dev.path" message="Project 'neard-dev' not found in ${neard-dev.path}" />
-    <echo message="Neard dev found in ${neard-dev.path}" level="debug" /> 
+    <if>
+      <matches string="${bundle.version}" pattern="^4p"/>
+      <then>
+        <foreach target="phpmyadmin.dl" param="phpmyadmin.version" inheritall="true">
+          <path><dirset dir="${bundle.path}" includes="*"/></path>
+        </foreach>
+      </then>
+      <else>
+        <antcall target="phpmyadmin.dl">
+          <param name="phpmyadmin.version" value="${bundle.version}"/>
+          <param name="phpmyadmin.single" value="true"/>
+        </antcall>
+      </else>
+    </if>
     
-    <!-- Import build-commons.xml -->
-    <import file="${neard-dev.path}/build/build-commons.xml" />
-    <!-- Import build-bundle.xml -->
-    <import file="${neard-dev.path}/build/build-bundle.xml" />
+    <copy todir="${bundle.tmp.prep.path}/${bundle.folder}" overwrite="true">
+      <fileset dir="${bundle.path}" defaultexcludes="yes"/>
+    </copy>
+  </target>
+  
+  <target name="phpmyadmin.dl">
+    <var name="phpmyadmin.version2" unset="true"/>
+    <if>
+      <istrue value="${phpmyadmin.single}"/>
+      <then>
+        <property name="phpmyadmin.version2" value="${phpmyadmin.version}"/>
+      </then>
+      <else>
+        <basename property="phpmyadmin.version2" file="${phpmyadmin.version}"/>
+      </else>
+    </if>
     
+    <getbundlesrc name="${bundle.name}" version="${phpmyadmin.version2}" propSrcDest="bundle.srcdest" propSrcFilename="bundle.srcfilename"/>
+    
+    <propertyregex property="bundle.srcbasename" input="${bundle.srcfilename}" regexp="(.*)\.(.*)" select="\1"/>
+    <if>
+      <not><available file="${bundle.srcdest}/${bundle.srcbasename}/config.sample.inc.php" type="file"/></not>
+      <then>
+        <fail message="File not found: ${bundle.srcdest}/${bundle.srcbasename}/config.sample.inc.php"/>
+      </then>
+    </if>
+    
+    <if>
+      <istrue value="${phpmyadmin.single}"/>
+      <then>
+        <copy todir="${bundle.tmp.prep.path}/${bundle.folder}">
+          <fileset dir="${bundle.srcdest}/${bundle.srcbasename}" defaultexcludes="yes" excludes="config.sample.inc.php"/>
+        </copy>
+      </then>
+      <else>
+        <copy todir="${bundle.tmp.prep.path}/${bundle.folder}/${phpmyadmin.version2}">
+          <fileset dir="${bundle.srcdest}/${bundle.srcbasename}" defaultexcludes="yes" excludes="config.sample.inc.php"/>
+        </copy>
+      </else>
+    </if>
+  </target>
+  
 </project>

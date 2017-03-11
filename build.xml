@@ -55,7 +55,7 @@
       </else>
     </if>
     
-    <getbundlesrc name="${bundle.name}" version="${phpmyadmin.version2}" propSrcDest="bundle.srcdest" propSrcFilename="bundle.srcfilename"/>
+    <getmoduleuntouched name="${bundle.name}" version="${phpmyadmin.version2}" propSrcDest="bundle.srcdest" propSrcFilename="bundle.srcfilename"/>
     
     <propertyregex property="bundle.srcbasename" input="${bundle.srcfilename}" regexp="(.*)\.(.*)" select="\1"/>
     <assertfile file="${bundle.srcdest}/${bundle.srcbasename}/config.sample.inc.php"/>

@@ -2,11 +2,11 @@
 
 ## r8 (2017/05/21)
 
-* New bundle pack p5 4.0.10.20 / 4.4.15.10 / 4.7.0 (Issue crazy-max/neard#259)
+* New bundle pack p5 4.0.10.20 / 4.4.15.10 / 4.7.0 (Issue neard/neard#259)
 
 ## r7 (2017/01/24)
 
-* New bundle pack p5 4.0.10.19 / 4.4.15.10 / 4.6.6 (Issue crazy-max/neard#208)
+* New bundle pack p5 4.0.10.19 / 4.4.15.10 / 4.6.6 (Issue neard/neard#208)
 
 ## r6 (2016/10/07)
 

@@ -5,7 +5,7 @@ This is a module of [Neard project](https://github.com/neard/neard) involving ph
 
 ## Documentation and downloads
 
-http://neard.io/modules/phpmyadmin
+https://neard.io/modules/phpmyadmin
 
 ## Issues
 

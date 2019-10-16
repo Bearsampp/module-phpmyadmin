@@ -1,6 +1,10 @@
 # Changelog
 
-## r8 (2018/10/06)
+## r10 (2019/10/16)
+
+* New release pack p8 4.0.10.20 / 4.9.1 (Issue neard/neard#423)
+
+## r9 (2018/10/06)
 
 * New release pack p7 4.0.10.20 / 4.8.3 (Issue neard/neard#394)
 

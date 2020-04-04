@@ -1,20 +1,24 @@
 # Changelog
 
+## r11 (2020/04/04)
+
+* New release pack p9 4.0.10.20 / 4.9.5 (neard/neard#443)
+
 ## r10 (2019/10/16)
 
-* New release pack p8 4.0.10.20 / 4.9.1 (Issue neard/neard#423)
+* New release pack p8 4.0.10.20 / 4.9.1 (neard/neard#423)
 
 ## r9 (2018/10/06)
 
-* New release pack p7 4.0.10.20 / 4.8.3 (Issue neard/neard#394)
+* New release pack p7 4.0.10.20 / 4.8.3 (neard/neard#394)
 
 ## r8 (2017/05/21)
 
-* New release pack p6 4.0.10.20 / 4.4.15.10 / 4.7.0 (Issue neard/neard#259)
+* New release pack p6 4.0.10.20 / 4.4.15.10 / 4.7.0 (neard/neard#259)
 
 ## r7 (2017/01/24)
 
-* New release pack p5 4.0.10.19 / 4.4.15.10 / 4.6.6 (Issue neard/neard#208)
+* New release pack p5 4.0.10.19 / 4.4.15.10 / 4.6.6 (neard/neard#208)
 
 ## r6 (2016/10/07)
 

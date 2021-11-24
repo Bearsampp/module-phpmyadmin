@@ -1,5 +1,8 @@
 # Jetbrains
 /*.iml
+/*.idea
+/.vs
+/.vsc
 
 # Neard
 /.dev

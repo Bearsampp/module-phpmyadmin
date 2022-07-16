@@ -1,28 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project name="module-phpmyadmin" basedir=".">
-  
+
   <dirname property="project.basedir" file="${ant.file.module-phpmyadmin}"/>
   <property name="root.dir" location="${project.basedir}/.."/>
   <property name="build.properties" value="${project.basedir}/build.properties"/>
   <property file="${build.properties}"/>
-  
-  <!-- Neard dev -->
+
+  <!-- Bearsampp dev -->
   <property name="dev.path" location="${root.dir}/dev"/>
   <fail unless="dev.path" message="Project 'dev' not found in ${dev.path}"/>
-  <echo message="Neard dev found in ${dev.path}" level="debug"/> 
-  
+  <echo message="Bearsampp dev found in ${dev.path}" level="debug"/>
+
   <!-- Import build-commons.xml -->
   <import file="${dev.path}/build/build-commons.xml"/>
   <!-- Import build-bundle.xml -->
   <import file="${dev.path}/build/build-bundle.xml"/>
-  
+
   <target name="release.build">
     <basename property="bundle.folder" file="${bundle.path}"/>
     <replaceproperty src="bundle.folder" dest="bundle.version" replace="${bundle.name}" with=""/>
-    
+
     <delete dir="${bundle.tmp.prep.path}/${bundle.folder}"/>
     <mkdir dir="${bundle.tmp.prep.path}/${bundle.folder}"/>
-    
+
     <if>
       <matches string="${bundle.version}" pattern="^4p"/>
       <then>
@@ -37,12 +37,12 @@
         </antcall>
       </else>
     </if>
-    
+
     <copy todir="${bundle.tmp.prep.path}/${bundle.folder}" overwrite="true">
       <fileset dir="${bundle.path}" defaultexcludes="yes"/>
     </copy>
   </target>
-  
+
   <target name="phpmyadmin.dl">
     <var name="phpmyadmin.version2" unset="true"/>
     <if>
@@ -54,12 +54,12 @@
         <basename property="phpmyadmin.version2" file="${phpmyadmin.version}"/>
       </else>
     </if>
-    
+
     <getmoduleuntouched name="${bundle.name}" version="${phpmyadmin.version2}" propSrcDest="bundle.srcdest" propSrcFilename="bundle.srcfilename"/>
-    
+
     <propertyregex property="bundle.srcbasename" input="${bundle.srcfilename}" regexp="(.*)\.(.*)" select="\1"/>
     <assertfile file="${bundle.srcdest}/${bundle.srcbasename}/config.sample.inc.php"/>
-    
+
     <if>
       <istrue value="${phpmyadmin.single}"/>
       <then>
@@ -78,5 +78,5 @@
       </else>
     </if>
   </target>
-  
+
 </project>

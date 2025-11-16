@@ -1,17 +1,15 @@
 /*
  * Bearsampp Module phpMyAdmin - Gradle Build
  *
- * This is a hybrid build configuration that:
- * 1. Imports existing Ant build files for backward compatibility
- * 2. Provides modern Gradle features (caching, incremental builds, parallel execution)
- * 3. Allows gradual migration from Ant to Gradle
+ * Pure Gradle implementation for building phpMyAdmin module releases.
  *
  * Usage:
  *   gradle tasks                              - List all available tasks
- *   gradle release                            - Interactive release (prompts for version)
- *   gradle release "-PbundleVersion=5.2.1"    - Non-interactive release
+ *   gradle release -PbundleVersion=5.2.1      - Build release for specific version
+ *   gradle releaseAll                         - Build all available versions
  *   gradle clean                              - Clean build artifacts
  *   gradle info                               - Display build information
+ *   gradle verify                             - Verify build environment
  */
 
 plugins {
@@ -32,18 +30,35 @@ ext {
     projectBasedir = projectDir.absolutePath
     rootDir = projectDir.parent
     devPath = file("${rootDir}/dev").absolutePath
-    buildPropertiesFile = file('build.properties').absolutePath
 
     // Bundle properties from build.properties
     bundleName = buildProps.getProperty('bundle.name', 'phpmyadmin')
     bundleRelease = buildProps.getProperty('bundle.release', '1.0.0')
     bundleType = buildProps.getProperty('bundle.type', 'apps')
     bundleFormat = buildProps.getProperty('bundle.format', '7z')
+
+    // Build paths - with configurable base path
+    // Priority: 1) build.properties, 2) Environment variable, 3) Default
+    def buildPathFromProps = buildProps.getProperty('build.path', '').trim()
+    def buildPathFromEnv = System.getenv('BEARSAMPP_BUILD_PATH') ?: ''
+    def defaultBuildPath = "${rootDir}/bearsampp-build"
+
+    buildBasePath = buildPathFromProps ?: (buildPathFromEnv ?: defaultBuildPath)
+
+    // Use shared bearsampp-build/tmp directory structure (same as Ant builds)
+    buildTmpPath = file("${buildBasePath}/tmp").absolutePath
+    bundleTmpBuildPath = file("${buildTmpPath}/bundles_build/${bundleType}/${bundleName}").absolutePath
+    bundleTmpPrepPath = file("${buildTmpPath}/bundles_prep/${bundleType}/${bundleName}").absolutePath
+    bundleTmpSrcPath = file("${buildTmpPath}/bundles_src").absolutePath
+
+    // Download and extract paths - use bearsampp-build/tmp instead of local build/
+    bundleTmpDownloadPath = file("${buildTmpPath}/downloads/${bundleName}").absolutePath
+    bundleTmpExtractPath = file("${buildTmpPath}/extract/${bundleName}").absolutePath
 }
 
 // Verify dev path exists
 if (!file(ext.devPath).exists()) {
-    throw new GradleException("Dev path not found: ${ext.devPath}. Please ensure the 'dev' project exists in ${ext.rootDir}")
+    logger.warn("Dev path not found: ${ext.devPath}. Some features may not be available.")
 }
 
 // Configure repositories for dependencies
@@ -52,28 +67,122 @@ repositories {
 }
 
 // ============================================================================
-// ANT INTEGRATION - Import existing Ant build files
+// HELPER FUNCTIONS
 // ============================================================================
 
-// Set Ant properties before importing
-ant.properties['project.basedir'] = ext.projectBasedir
-ant.properties['root.dir'] = ext.rootDir
-ant.properties['dev.path'] = ext.devPath
-ant.properties['build.properties'] = ext.buildPropertiesFile
+// Helper function to fetch modules-untouched properties
+def fetchModulesUntouchedProperties() {
+    def propsUrl = "https://raw.githubusercontent.com/Bearsampp/modules-untouched/main/modules/phpmyadmin.properties"
+    
+    try {
+        def connection = new URL(propsUrl).openConnection()
+        connection.setRequestProperty("User-Agent", "Bearsampp-Gradle-Build")
+        connection.setConnectTimeout(10000)
+        connection.setReadTimeout(10000)
+        
+        def props = new Properties()
+        connection.inputStream.withCloseable { stream ->
+            props.load(stream)
+        }
+        return props
+    } catch (Exception e) {
+        logger.warn("Could not fetch modules-untouched properties: ${e.message}")
+        return null
+    }
+}
 
-// Load build.properties into Ant
-ant.property(file: ext.buildPropertiesFile)
+// Helper function to resolve download URL for a version
+def resolveDownloadUrl(String version) {
+    // First try modules-untouched
+    def untouchedProps = fetchModulesUntouchedProperties()
+    if (untouchedProps && untouchedProps.containsKey(version)) {
+        return untouchedProps.getProperty(version)
+    }
+    
+    // Fallback to releases.properties
+    def releasesFile = file('releases.properties')
+    if (releasesFile.exists()) {
+        def releases = new Properties()
+        releasesFile.withInputStream { releases.load(it) }
+        if (releases.containsKey(version)) {
+            return releases.getProperty(version)
+        }
+    }
+    
+    // Fallback to standard URL format
+    return "https://files.phpmyadmin.net/phpMyAdmin/${version}/phpMyAdmin-${version}-all-languages.7z"
+}
 
-// Import the main Ant build file
-// This preserves all existing Ant functionality
-ant.importBuild('build.xml') { antTargetName ->
-    // Map Ant target names to Gradle task names
-    // Prefix all with 'ant-' to avoid conflicts
-    return "ant-${antTargetName}".toString()
+// Helper function to download and extract phpMyAdmin
+def downloadAndExtractPhpMyAdmin(String version, File destDir, String tmpPath) {
+    def downloadUrl = resolveDownloadUrl(version)
+    println "Download URL: ${downloadUrl}"
+    
+    def fileName = downloadUrl.substring(downloadUrl.lastIndexOf('/') + 1)
+    def downloadFile = file("${bundleTmpDownloadPath}/${fileName}")
+    
+    // Create temp directory
+    downloadFile.parentFile.mkdirs()
+    
+    // Download if not already present
+    if (!downloadFile.exists()) {
+        println "Downloading phpMyAdmin ${version}..."
+        def connection = new URL(downloadUrl).openConnection()
+        connection.setRequestProperty("User-Agent", "Bearsampp-Gradle-Build")
+        
+        downloadFile.withOutputStream { out ->
+            connection.inputStream.withCloseable { input ->
+                out << input
+            }
+        }
+        println "Downloaded: ${downloadFile.name}"
+    } else {
+        println "Using cached download: ${downloadFile.name}"
+    }
+    
+    // Extract archive
+    println "Extracting phpMyAdmin ${version}..."
+    def sevenZip = find7ZipExecutable()
+    if (!sevenZip) {
+        throw new GradleException("7-Zip not found. Please install 7-Zip or set 7Z_HOME environment variable.")
+    }
+    
+    def extractDir = file("${bundleTmpExtractPath}/${version}")
+    if (extractDir.exists()) {
+        delete extractDir
+    }
+    extractDir.mkdirs()
+    
+    def extractCmd = [sevenZip, 'x', downloadFile.absolutePath, "-o${extractDir.absolutePath}", '-y']
+    def extractProcess = extractCmd.execute()
+    extractProcess.consumeProcessOutput(System.out, System.err)
+    def extractExitCode = extractProcess.waitFor()
+    
+    if (extractExitCode != 0) {
+        throw new GradleException("Failed to extract phpMyAdmin archive")
+    }
+    
+    // Find the extracted directory (should be phpMyAdmin-X.X.X-all-languages)
+    def extractedDirs = extractDir.listFiles().findAll { it.isDirectory() }
+    if (extractedDirs.isEmpty()) {
+        throw new GradleException("No directory found after extraction")
+    }
+    
+    def sourceDir = extractedDirs[0]
+    println "Extracted to: ${sourceDir.name}"
+    
+    // Copy to destination
+    copy {
+        from sourceDir
+        into destDir
+        exclude 'config.sample.inc.php'
+    }
+    
+    println "phpMyAdmin ${version} prepared successfully"
 }
 
 // ============================================================================
-// GRADLE NATIVE TASKS - Modern alternatives and enhancements
+// GRADLE TASKS
 // ============================================================================
 
 // Task: Display build information
@@ -82,25 +191,52 @@ tasks.register('info') {
     description = 'Display build configuration information'
 
     doLast {
+        def projectName = project.name
+        def projectVersion = project.version
+        def projectDescription = project.description
+        def projectBasedirValue = projectBasedir
+        def rootDirValue = rootDir
+        def devPathValue = devPath
+        def bundleNameValue = bundleName
+        def bundleReleaseValue = bundleRelease
+        def bundleTypeValue = bundleType
+        def bundleFormatValue = bundleFormat
+        def buildBasePathValue = buildBasePath
+        def buildTmpPathValue = buildTmpPath
+        def bundleTmpBuildPathValue = bundleTmpBuildPath
+        def bundleTmpPrepPathValue = bundleTmpPrepPath
+        def bundleTmpSrcPathValue = bundleTmpSrcPath
+        def bundleTmpDownloadPathValue = bundleTmpDownloadPath
+        def bundleTmpExtractPathValue = bundleTmpExtractPath
+        
         println """
         ================================================================
                   Bearsampp Module phpMyAdmin - Build Info
         ================================================================
 
-        Project:        ${project.name}
-        Version:        ${project.version}
-        Description:    ${project.description}
+        Project:        ${projectName}
+        Version:        ${projectVersion}
+        Description:    ${projectDescription}
 
         Bundle Properties:
-          Name:         ${bundleName}
-          Release:      ${bundleRelease}
-          Type:         ${bundleType}
-          Format:       ${bundleFormat}
+          Name:         ${bundleNameValue}
+          Release:      ${bundleReleaseValue}
+          Type:         ${bundleTypeValue}
+          Format:       ${bundleFormatValue}
 
         Paths:
-          Project Dir:  ${projectBasedir}
-          Root Dir:     ${rootDir}
-          Dev Path:     ${devPath}
+          Project Dir:  ${projectBasedirValue}
+          Root Dir:     ${rootDirValue}
+          Dev Path:     ${devPathValue}
+          Build Base:   ${buildBasePathValue}
+
+        Build Paths:
+          Tmp:          ${buildTmpPathValue}
+          Build:        ${bundleTmpBuildPathValue}
+          Prep:         ${bundleTmpPrepPathValue}
+          Src:          ${bundleTmpSrcPathValue}
+          Download:     ${bundleTmpDownloadPathValue}
+          Extract:      ${bundleTmpExtractPathValue}
 
         Java:
           Version:      ${JavaVersion.current()}
@@ -112,85 +248,423 @@ tasks.register('info') {
 
         Available Task Groups:
           * build        - Build and package tasks
-          * ant tasks    - Legacy Ant tasks (prefixed with 'ant-')
           * help         - Help and information tasks
+          * verification - Verification tasks
 
         Quick Start:
           gradle tasks                              - List all available tasks
           gradle info                               - Show this information
-          gradle release                            - Interactive release build
-          gradle release "-PbundleVersion=5.2.1"    - Non-interactive release
+          gradle release -PbundleVersion=5.2.1      - Build release for version
+          gradle releaseAll                         - Build all versions
           gradle clean                              - Clean build artifacts
           gradle verify                             - Verify build environment
         """.stripIndent()
     }
 }
 
-// Task: Main release task - supports both interactive and non-interactive modes
+// Task: Main release task
 tasks.register('release') {
     group = 'build'
-    description = 'Build release package (interactive or use -PbundleVersion=X.X.X for non-interactive)'
+    description = 'Build release package for a specific version (use -PbundleVersion=X.X.X or run interactively)'
 
-    // Ensure libraries are loaded first
-    dependsOn 'ant-load.lib'
+    // Capture property at configuration time to avoid deprecation warning
+    def versionProperty = findProperty('bundleVersion')
 
     doLast {
-        def versionToBuild = project.findProperty('bundleVersion')
+        def versionToBuild = versionProperty
 
-        if (versionToBuild) {
-            // Non-interactive mode with specified version
+        if (!versionToBuild) {
+            // Interactive mode - prompt for version
+            def availableVersions = getAvailableVersions()
+
+            if (availableVersions.isEmpty()) {
+                throw new GradleException("No versions found in bin/ directory")
+            }
+
+            println ""
             println "=".multiply(70)
-            println "Building release for ${bundleName} version ${versionToBuild}..."
+            println "Interactive Release Mode"
             println "=".multiply(70)
+            println ""
+            println "Available versions:"
 
-            def bundlePath = file("${projectDir}/bin/${bundleName}${versionToBuild}")
+            // Show versions with location tags
+            def binDir = file("${projectDir}/bin")
+            def archivedDir = file("${projectDir}/bin/archived")
 
+            availableVersions.eachWithIndex { version, index ->
+                def location = ""
+                if (binDir.exists() && file("${binDir}/${bundleName}${version}").exists()) {
+                    location = "[bin]"
+                } else if (archivedDir.exists() && file("${archivedDir}/${bundleName}${version}").exists()) {
+                    location = "[bin/archived]"
+                }
+                println "  ${(index + 1).toString().padLeft(2)}. ${version.padRight(15)} ${location}"
+            }
+            println ""
+            println "Enter version to build (index or version string):"
+            println ""
+
+            // Read input using Gradle's standard input
+            def input = null
+            try {
+                def reader = new BufferedReader(new InputStreamReader(System.in))
+                input = reader.readLine()
+            } catch (Exception e) {
+                throw new GradleException("""
+                    Failed to read input. Please use non-interactive mode:
+                      gradle release -PbundleVersion=X.X.X
+
+                    Available versions: ${availableVersions.join(', ')}
+                """.stripIndent())
+            }
+
+            if (!input || input.trim().isEmpty()) {
+                throw new GradleException("""
+                    No version selected. Please use non-interactive mode:
+                      gradle release -PbundleVersion=X.X.X
+
+                    Available versions: ${availableVersions.join(', ')}
+                """.stripIndent())
+            }
+
+            def cleaned = input.trim()
+
+            // Accept either an index (1..N) or an explicit version string
+            if (cleaned.isInteger()) {
+                def idx = cleaned.toInteger()
+                if (idx < 1 || idx > availableVersions.size()) {
+                    throw new GradleException("""
+                        Invalid selection index: ${cleaned}
+
+                        Please choose a number between 1 and ${availableVersions.size()} or enter a version string.
+                    """.stripIndent())
+                }
+                versionToBuild = availableVersions[idx - 1]
+            } else {
+                versionToBuild = cleaned
+                // Validate the entered version string exists
+                if (!availableVersions.contains(versionToBuild)) {
+                    throw new GradleException("""
+                        Invalid version: ${versionToBuild}
+
+                        Please choose from available versions:
+                        ${availableVersions.collect { "  - ${it}" }.join('\n')}
+                    """.stripIndent())
+                }
+            }
+
+            println ""
+            println "Selected version: ${versionToBuild}"
+        }
+
+        println ""
+        println "=".multiply(70)
+        println "Building release for ${bundleName} version ${versionToBuild}"
+        println "=".multiply(70)
+        println ""
+
+        // Check if version folder exists - check both bin and bin/archived directories
+        def bundlePath = file("${projectDir}/bin/${bundleName}${versionToBuild}")
+        if (!bundlePath.exists()) {
+            bundlePath = file("${projectDir}/bin/archived/${bundleName}${versionToBuild}")
             if (!bundlePath.exists()) {
-                def availableVersions = file("${projectDir}/bin").listFiles()
-                    .findAll { it.isDirectory() && it.name.startsWith(bundleName) }
-                    .collect { "  - " + it.name.replace(bundleName, '') }
-                    .join('\n')
+                def availableVersions = getAvailableVersions()
+                def versionList = availableVersions.isEmpty() ? "  (none found)" : availableVersions.collect { "  - ${it}" }.join('\n')
+                
+                throw new GradleException("Bundle version not found in bin/ or bin/archived/\n\nAvailable versions:\n${versionList}")
+            }
+        }
 
-                throw new GradleException("Bundle version not found: ${bundlePath}\n\nAvailable versions in bin/:\n${availableVersions}")
+        println "Bundle path: ${bundlePath}"
+        println ""
+
+        // Get the bundle folder and version
+        def bundleFolder = bundlePath.name
+        def bundleVersion = bundleFolder.replace(bundleName, '')
+
+        // Prepare output directory
+        def phpmyadminPrepPath = file("${bundleTmpPrepPath}/${bundleName}${bundleVersion}")
+        if (phpmyadminPrepPath.exists()) {
+            delete phpmyadminPrepPath
+        }
+        phpmyadminPrepPath.mkdirs()
+
+        // Download and extract phpMyAdmin
+        println "Downloading and extracting phpMyAdmin ${bundleVersion}..."
+        downloadAndExtractPhpMyAdmin(bundleVersion, phpmyadminPrepPath, buildTmpPath)
+        println ""
+
+        // Copy configuration files from bin folder
+        println "Copying configuration files..."
+        copy {
+            from bundlePath
+            into phpmyadminPrepPath
+        }
+        println ""
+
+        // Copy to bundles_build directory (non-zip version for development/testing)
+        println "Copying to bundles_build directory..."
+        def phpmyadminBuildPath = file("${bundleTmpBuildPath}/${bundleName}${bundleVersion}")
+        if (phpmyadminBuildPath.exists()) {
+            delete phpmyadminBuildPath
+        }
+        phpmyadminBuildPath.mkdirs()
+
+        copy {
+            from phpmyadminPrepPath
+            into phpmyadminBuildPath
+        }
+        println "Non-zip version available at: ${phpmyadminBuildPath}"
+
+        println ""
+        println "Preparing archive..."
+
+        // Determine build output path following Apache pattern
+        // bearsampp-build/apps/phpmyadmin/{bundleRelease} for apps
+        def buildPath = file(buildBasePath)
+        def buildBinsPath = file("${buildPath}/${bundleType}/${bundleName}/${bundleRelease}")
+        buildBinsPath.mkdirs()
+
+        // Build archive filename
+        def destFile = file("${buildBinsPath}/bearsampp-${bundleName}-${bundleVersion}-${bundleRelease}")
+        def archiveFile = file("${destFile}.${bundleFormat}")
+
+        if (archiveFile.exists()) {
+            delete archiveFile
+        }
+
+        println "Compressing ${bundleName}${bundleVersion} to ${archiveFile.name}..."
+
+        def sevenZip = find7ZipExecutable()
+        if (!sevenZip) {
+            throw new GradleException("7-Zip not found. Please install 7-Zip or set 7Z_HOME environment variable.")
+        }
+
+        println "Using 7-Zip: ${sevenZip}"
+
+        // Create archive with version folder included
+        // Run 7z from the parent directory and add the folder name, so the
+        // archive root contains `${bundleName}${bundleVersion}` directory.
+        def folderName = phpmyadminPrepPath.name
+        def command = [
+            sevenZip,
+            'a',
+            '-t7z',
+            archiveFile.absolutePath.toString(),
+            folderName
+        ]
+
+        def process = new ProcessBuilder(command as String[])
+            .directory(file(bundleTmpPrepPath))
+            .redirectErrorStream(true)
+            .start()
+
+        process.inputStream.eachLine { line ->
+            if (line.trim()) println "  ${line}"
+        }
+
+        def exitCode = process.waitFor()
+        if (exitCode != 0) {
+            throw new GradleException("7zip compression failed with exit code: ${exitCode}")
+        }
+
+        println "Archive created: ${archiveFile}"
+
+        // Generate hash files
+        println "Generating hash files..."
+        generateHashFiles(archiveFile)
+
+        println ""
+        println "=".multiply(70)
+        println "[SUCCESS] Release build completed successfully for version ${versionToBuild}"
+        println "Output directory: ${phpmyadminBuildPath}"
+        println "Archive: ${archiveFile}"
+        println "=".multiply(70)
+    }
+}
+
+// Helper function to find 7-Zip executable
+def find7ZipExecutable() {
+    // Check environment variable
+    def sevenZipHome = System.getenv('7Z_HOME')
+    if (sevenZipHome) {
+        def exe = file("${sevenZipHome}/7z.exe")
+        if (exe.exists()) {
+            return exe.absolutePath
+        }
+    }
+
+    // Check common installation paths
+    def commonPaths = [
+        'C:/Program Files/7-Zip/7z.exe',
+        'C:/Program Files (x86)/7-Zip/7z.exe',
+        'D:/Program Files/7-Zip/7z.exe',
+        'D:/Program Files (x86)/7-Zip/7z.exe'
+    ]
+
+    for (path in commonPaths) {
+        def exe = file(path)
+        if (exe.exists()) {
+            return exe.absolutePath
+        }
+    }
+
+    // Try to find in PATH
+    try {
+        def process = ['where', '7z.exe'].execute()
+        process.waitFor()
+        if (process.exitValue() == 0) {
+            def output = process.text.trim()
+            if (output) {
+                return output.split('\n')[0].trim()
+            }
+        }
+    } catch (Exception e) {
+        // Ignore
+    }
+
+    return null
+}
+
+// Helper function to generate hash files
+def generateHashFiles(File file) {
+    if (!file.exists()) {
+        throw new GradleException("File not found for hashing: ${file}")
+    }
+
+    // Generate MD5
+    def md5File = new File("${file.absolutePath}.md5")
+    def md5Hash = calculateHash(file, 'MD5')
+    md5File.text = "${md5Hash} ${file.name}\n"
+    println "  Created: ${md5File.name}"
+
+    // Generate SHA1
+    def sha1File = new File("${file.absolutePath}.sha1")
+    def sha1Hash = calculateHash(file, 'SHA-1')
+    sha1File.text = "${sha1Hash} ${file.name}\n"
+    println "  Created: ${sha1File.name}"
+
+    // Generate SHA256
+    def sha256File = new File("${file.absolutePath}.sha256")
+    def sha256Hash = calculateHash(file, 'SHA-256')
+    sha256File.text = "${sha256Hash} ${file.name}\n"
+    println "  Created: ${sha256File.name}"
+
+    // Generate SHA512
+    def sha512File = new File("${file.absolutePath}.sha512")
+    def sha512Hash = calculateHash(file, 'SHA-512')
+    sha512File.text = "${sha512Hash} ${file.name}\n"
+    println "  Created: ${sha512File.name}"
+}
+
+// Helper function to calculate hash
+def calculateHash(File file, String algorithm) {
+    def digest = java.security.MessageDigest.getInstance(algorithm)
+    file.withInputStream { stream ->
+        def buffer = new byte[8192]
+        def bytesRead
+        while ((bytesRead = stream.read(buffer)) != -1) {
+            digest.update(buffer, 0, bytesRead)
+        }
+    }
+    return digest.digest().collect { String.format('%02x', it) }.join('')
+}
+
+// Helper function to get available versions
+def getAvailableVersions() {
+    def versions = []
+
+    // Check bin directory
+    def binDir = file("${projectDir}/bin")
+    if (binDir.exists()) {
+        def binVersions = binDir.listFiles()
+            ?.findAll { it.isDirectory() && it.name.startsWith(bundleName) && it.name != 'archived' }
+            ?.collect { it.name.replace(bundleName, '') } ?: []
+        versions.addAll(binVersions)
+    }
+
+    // Check bin/archived subdirectory
+    def archivedDir = file("${projectDir}/bin/archived")
+    if (archivedDir.exists()) {
+        def archivedVersions = archivedDir.listFiles()
+            ?.findAll { it.isDirectory() && it.name.startsWith(bundleName) }
+            ?.collect { it.name.replace(bundleName, '') } ?: []
+        versions.addAll(archivedVersions)
+    }
+
+    // Remove duplicates and sort
+    return versions.unique().sort()
+}
+
+// Task: Build all available versions
+tasks.register('releaseAll') {
+    group = 'build'
+    description = 'Build release packages for all available versions in bin/ directory'
+
+    doLast {
+        def versions = getAvailableVersions()
+
+        if (versions.isEmpty()) {
+            throw new GradleException("No versions found in bin/ directory")
+        }
+
+        println ""
+        println "=".multiply(70)
+        println "Building releases for ${versions.size()} ${bundleName} versions"
+        println "=".multiply(70)
+        println ""
+
+        def successCount = 0
+        def failedVersions = []
+
+        versions.each { version ->
+            println "=".multiply(70)
+            println "[${successCount + 1}/${versions.size()}] Building ${bundleName} ${version}..."
+            println "=".multiply(70)
+
+            try {
+                // Call release task for this version
+                project.ext.bundleVersion = version
+                tasks.getByName('release').actions.each { action ->
+                    action.execute(tasks.getByName('release'))
+                }
+
+                println ""
+                println "[SUCCESS] ${bundleName} ${version} completed"
+                successCount++
+
+            } catch (Exception e) {
+                println ""
+                println "[FAILED] ${bundleName} ${version}: ${e.message}"
+                failedVersions.add(version)
             }
 
-            println "Bundle path: ${bundlePath}"
             println ""
+        }
 
-            // Execute Ant command directly to avoid Gradle Ant integration issues
-            def antCommand = ["cmd", "/c", "ant", "release", "-Dinput.bundle=${versionToBuild}"]
-            println "Executing: ant release -Dinput.bundle=${versionToBuild}"
+        // Summary
+        println "=".multiply(70)
+        println "Build Summary"
+        println "=".multiply(70)
+        println "Total versions: ${versions.size()}"
+        println "Successful:     ${successCount}"
+        println "Failed:         ${failedVersions.size()}"
+
+        if (!failedVersions.isEmpty()) {
             println ""
-
-            def process = antCommand.execute(null, projectDir)
-            process.consumeProcessOutput(System.out, System.err)
-            def exitCode = process.waitFor()
-
-            if (exitCode != 0) {
-                throw new GradleException("Ant release failed with exit code: ${exitCode}")
+            println "Failed versions:"
+            failedVersions.each { v ->
+                println "  - ${v}"
             }
+        }
 
-            println ""
-            println "=".multiply(70)
-            println "[SUCCESS] Release build completed successfully for version ${versionToBuild}"
-            println "=".multiply(70)
+        println "=".multiply(70)
+
+        if (failedVersions.isEmpty()) {
+            println "[SUCCESS] All versions built successfully!"
         } else {
-            // Interactive mode - call Ant release target which will prompt for input
-            println "=".multiply(70)
-            println "Starting interactive release build..."
-            println "You will be prompted to enter the bundle version."
-            println "=".multiply(70)
-            println ""
-
-            // Call the imported ant-release target for interactive mode
-            tasks.getByName('ant-release').actions.each { action ->
-                action.execute(tasks.getByName('ant-release'))
-            }
-
-            println ""
-            println "=".multiply(70)
-            println "[SUCCESS] Release build completed"
-            println "=".multiply(70)
+            throw new GradleException("${failedVersions.size()} version(s) failed to build")
         }
     }
 }
@@ -207,21 +681,52 @@ tasks.named('clean') {
             delete buildDir
         }
 
-        // Clean any temporary directories that might be created
-        // Use manual directory traversal to avoid fileTree default excludes issue
-        def tmpDirs = []
-        projectDir.eachFileRecurse { file ->
-            if (file.isDirectory() && (file.name == 'tmp' || file.name == '.tmp')) {
-                tmpDirs.add(file)
-            }
+        println "[SUCCESS] Build artifacts cleaned"
+    }
+}
+
+// Task: Clean all including downloads and tmp files
+tasks.register('cleanAll') {
+    group = 'build'
+    description = 'Clean all build artifacts, downloads, and temporary files'
+
+    doLast {
+        println "Cleaning all build artifacts and temporary files..."
+        
+        def itemsToClean = []
+        
+        // Clean Gradle build directory
+        def buildDir = file("${projectDir}/build")
+        if (buildDir.exists()) {
+            itemsToClean.add("Gradle build directory")
+            delete buildDir
         }
-        tmpDirs.each { dir ->
-            if (dir.exists()) {
-                delete dir
+
+        // Clean tmp directory (downloads, extracts, prep, build)
+        def tmpDir = file(buildTmpPath)
+        if (tmpDir.exists()) {
+            itemsToClean.add("Tmp directory (${tmpDir})")
+            delete tmpDir
+        }
+
+        // Clean final output directory
+        def outputDir = file("${buildBasePath}/${bundleType}/${bundleName}")
+        if (outputDir.exists()) {
+            itemsToClean.add("Output directory (${outputDir})")
+            delete outputDir
+        }
+
+        if (itemsToClean.isEmpty()) {
+            println "  Nothing to clean - all directories already clean"
+        } else {
+            println "  Cleaned:"
+            itemsToClean.each { item ->
+                println "    - ${item}"
             }
         }
 
-        println "[SUCCESS] Build artifacts cleaned"
+        println ""
+        println "[SUCCESS] All build artifacts and temporary files cleaned"
     }
 }
 
@@ -240,14 +745,15 @@ tasks.register('verify') {
         checks['Java 8+'] = javaVersion >= JavaVersion.VERSION_1_8
 
         // Check required files
-        checks['build.xml'] = file('build.xml').exists()
         checks['build.properties'] = file('build.properties').exists()
-        checks['releases.properties'] = file('releases.properties').exists()
 
-        // Check dev directory and required build files
-        checks['dev directory'] = file(devPath).exists()
-        checks['build-commons.xml'] = file("${devPath}/build/build-commons.xml").exists()
-        checks['build-bundle.xml'] = file("${devPath}/build/build-bundle.xml").exists()
+        // Check bin directory
+        checks['bin directory'] = file("${projectDir}/bin").exists()
+
+        // Check 7-Zip if format is 7z
+        if (bundleFormat == '7z') {
+            checks['7-Zip'] = find7ZipExecutable() != null
+        }
 
         println "\nEnvironment Check Results:"
         println "-".multiply(60)
@@ -261,8 +767,8 @@ tasks.register('verify') {
         if (allPassed) {
             println "\n[SUCCESS] All checks passed! Build environment is ready."
             println "\nYou can now run:"
-            println "  gradle release                            - Interactive release"
-            println "  gradle release \"-PbundleVersion=5.2.1\"    - Non-interactive release"
+            println "  gradle release -PbundleVersion=5.2.1   - Build release for version"
+            println "  gradle listVersions                     - List available versions"
         } else {
             println "\n[WARNING] Some checks failed. Please review the requirements."
             throw new GradleException("Build environment verification failed")
@@ -270,57 +776,73 @@ tasks.register('verify') {
     }
 }
 
-// Task: List all bundle versions from releases.properties
+// Task: List all bundle versions from modules-untouched phpmyadmin.properties
 tasks.register('listReleases') {
     group = 'help'
-    description = 'List all available releases from releases.properties'
+    description = 'List all available releases from modules-untouched phpmyadmin.properties'
 
     doLast {
-        def releasesFile = file('releases.properties')
-        if (!releasesFile.exists()) {
-            println "releases.properties not found"
-            return
+        def props = fetchModulesUntouchedProperties()
+        if (!props) {
+            println "\n[WARNING] Could not fetch modules-untouched phpmyadmin.properties."
+            println "Checking releases.properties instead..."
+            
+            def releasesFile = file('releases.properties')
+            if (releasesFile.exists()) {
+                props = new Properties()
+                releasesFile.withInputStream { props.load(it) }
+            } else {
+                println "No release information available."
+                return
+            }
         }
-
-        def releases = new Properties()
-        releasesFile.withInputStream { releases.load(it) }
 
         println "\nAvailable phpMyAdmin Releases:"
         println "-".multiply(80)
-        releases.sort { it.key }.each { version, url ->
+        props.sort { a, b -> a.key <=> b.key }.each { version, url ->
             println "  ${version.padRight(10)} -> ${url}"
         }
         println "-".multiply(80)
-        println "Total releases: ${releases.size()}"
+        println "Total releases: ${props.size()}"
     }
 }
 
-// Task: List available bundle versions in bin directory
+// Task: List available bundle versions in bin and bin/archived directories
 tasks.register('listVersions') {
     group = 'help'
-    description = 'List all available bundle versions in bin/ directory'
+    description = 'List all available bundle versions in bin/ and bin/archived/ directories'
 
     doLast {
-        def binDir = file("${projectDir}/bin")
-        if (!binDir.exists()) {
-            println "bin/ directory not found"
+        def versions = getAvailableVersions()
+
+        if (versions.isEmpty()) {
+            println "\nNo versions found in bin/ or bin/archived/ directories"
             return
         }
 
-        def versions = binDir.listFiles()
-            .findAll { it.isDirectory() && it.name.startsWith(bundleName) }
-            .collect { it.name.replace(bundleName, '') }
-            .sort()
-
-        println "\nAvailable ${bundleName} versions in bin/:"
+        println "\nAvailable ${bundleName} versions:"
         println "-".multiply(60)
+
+        // Show which directory each version is in
+        def binDir = file("${projectDir}/bin")
+        def archivedDir = file("${projectDir}/bin/archived")
+
         versions.each { version ->
-            println "  ${version}"
+            def location = ""
+            if (binDir.exists() && file("${binDir}/${bundleName}${version}").exists()) {
+                location = "[bin]"
+            } else if (archivedDir.exists() && file("${archivedDir}/${bundleName}${version}").exists()) {
+                location = "[bin/archived]"
+            }
+            println "  ${version.padRight(15)} ${location}"
         }
         println "-".multiply(60)
         println "Total versions: ${versions.size()}"
-        println "\nTo build a specific version:"
-        println "  gradle release \"-PbundleVersion=${versions.last()}\""
+
+        if (!versions.isEmpty()) {
+            println "\nTo build a specific version:"
+            println "  gradle release -PbundleVersion=${versions.last()}"
+        }
     }
 }
 
@@ -356,6 +878,80 @@ tasks.register('validateProperties') {
     }
 }
 
+// Task: Check modules-untouched integration
+tasks.register('checkModulesUntouched') {
+    group = 'verification'
+    description = 'Check modules-untouched repository integration and available versions'
+
+    doLast {
+        println ""
+        println "=".multiply(70)
+        println "Modules-Untouched Integration Check"
+        println "=".multiply(70)
+        println ""
+
+        def propsUrl = "https://raw.githubusercontent.com/Bearsampp/modules-untouched/main/modules/phpmyadmin.properties"
+        println "Repository URL:"
+        println "  ${propsUrl}"
+        println ""
+
+        println "Fetching phpmyadmin.properties from modules-untouched..."
+        def untouchedProps = fetchModulesUntouchedProperties()
+
+        if (untouchedProps) {
+            println ""
+            println "=".multiply(70)
+            println "Available Versions in modules-untouched"
+            println "=".multiply(70)
+
+            def sortedVersions = untouchedProps.sort { a, b ->
+                // Simple version comparison
+                def aParts = a.key.tokenize('.')
+                def bParts = b.key.tokenize('.')
+                for (int i = 0; i < Math.min(aParts.size(), bParts.size()); i++) {
+                    def aNum = aParts[i].toInteger()
+                    def bNum = bParts[i].toInteger()
+                    if (aNum != bNum) return aNum <=> bNum
+                }
+                return aParts.size() <=> bParts.size()
+            }
+
+            sortedVersions.each { version, url ->
+                println "  ${version.padRight(10)}"
+            }
+
+            println "=".multiply(70)
+            println "Total versions: ${untouchedProps.size()}"
+            println ""
+
+            println ""
+            println "=".multiply(70)
+            println "[SUCCESS] modules-untouched integration is working"
+            println "=".multiply(70)
+            println ""
+            println "Version Resolution Strategy:"
+            println "  1. Check modules-untouched phpmyadmin.properties (remote)"
+            println "  2. Check releases.properties (local)"
+            println "  3. Construct standard URL format (fallback)"
+
+        } else {
+            println ""
+            println "=".multiply(70)
+            println "[WARNING] Could not fetch phpmyadmin.properties from modules-untouched"
+            println "=".multiply(70)
+            println ""
+            println "This may be due to:"
+            println "  - Network connectivity issues"
+            println "  - Repository access problems"
+            println "  - File not available at expected location"
+            println ""
+            println "The build system will fall back to:"
+            println "  1. releases.properties (local)"
+            println "  2. Standard URL format construction"
+        }
+    }
+}
+
 // ============================================================================
 // BUILD LIFECYCLE HOOKS
 // ============================================================================
@@ -363,7 +959,7 @@ tasks.register('validateProperties') {
 gradle.taskGraph.whenReady { graph ->
     println """
     ================================================================
-      Bearsampp Module phpMyAdmin - Gradle + Ant Hybrid Build
+      Bearsampp Module phpMyAdmin - Gradle Build
     ================================================================
     """.stripIndent()
 }

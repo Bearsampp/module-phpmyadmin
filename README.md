@@ -11,7 +11,7 @@ https://bearsampp.com/module/phpmyadmin
 
 ## Build Documentation
 
-This module uses a **pure Gradle build system** for creating releases. For detailed information about building this module, including how version folders are structured and included in releases, see [BUILD.md](BUILD.md).
+This module uses a **pure Gradle build system** for creating releases. For detailed information about building this module, including how version folders are structured and included in releases, see [.gradle-docs/](.gradle-docs/).
 
 ### Quick Start
 
@@ -42,8 +42,11 @@ gradle info
 
 ### Documentation
 
-- [BUILD.md](BUILD.md) - Comprehensive build documentation
-- [GRADLE_MIGRATION.md](GRADLE_MIGRATION.md) - Migration details and verification
+Complete build documentation is available in [.gradle-docs/](.gradle-docs/):
+- [BUILD.md](.gradle-docs/BUILD.md) - Comprehensive build documentation
+- [GRADLE_MIGRATION.md](.gradle-docs/GRADLE_MIGRATION.md) - Migration details and verification
+- [VERSION_FOLDER_VERIFICATION.md](.gradle-docs/VERSION_FOLDER_VERIFICATION.md) - Version folder inclusion proof
+- [CHANGES.md](.gradle-docs/CHANGES.md) - Summary of all changes
 
 ### Requirements
 

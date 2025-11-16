@@ -3,11 +3,17 @@
  *
  * Pure Gradle implementation for building phpMyAdmin module releases.
  *
+ * DOCUMENTATION:
+ *   All build documentation is located in /.gradle-docs/
+ *   See /.gradle-docs/README.md for complete documentation index
+ *
  * Usage:
  *   gradle tasks                              - List all available tasks
+ *   gradle release                            - Build release (interactive mode)
  *   gradle release -PbundleVersion=5.2.1      - Build release for specific version
  *   gradle releaseAll                         - Build all available versions
  *   gradle clean                              - Clean build artifacts
+ *   gradle cleanAll                           - Clean all including downloads
  *   gradle info                               - Display build information
  *   gradle verify                             - Verify build environment
  */

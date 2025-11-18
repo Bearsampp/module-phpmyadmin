@@ -1,7 +1,8 @@
 # Version Folder Inclusion Verification
 
-## Issue
-Verify that the build system includes the version folder when compressing releases, matching the pattern from module-bruno.
+## Overview
+
+This document verifies that the build system correctly includes the version folder when compressing releases, matching the pattern from module-bruno and module-php.
 
 ## Status: ✅ VERIFIED
 
@@ -235,6 +236,6 @@ Execute from parent directory - Simple, efficient, and matches module-bruno patt
 ## References
 
 - [module-bruno build.gradle](https://github.com/Bearsampp/module-bruno/blob/gradle-convert/build.gradle)
+- [module-php build.gradle](https://github.com/Bearsampp/module-php/blob/gradle-convert/build.gradle)
 - [BUILD.md](BUILD.md) - Comprehensive build documentation
-- [GRADLE_MIGRATION.md](GRADLE_MIGRATION.md) - Migration details
 - [CHANGES.md](CHANGES.md) - Summary of all changes

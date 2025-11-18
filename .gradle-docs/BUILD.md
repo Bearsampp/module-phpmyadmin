@@ -8,30 +8,31 @@ This module uses a pure Gradle build system. The build process downloads phpMyAd
 
 ### Version Folder Inclusion
 
-When building a release, the build system **includes the version folder** in the compressed archive. This is consistent with other Bearsampp modules (e.g., module-bruno).
+When building a release, the build system **includes the version folder** in the compressed archive. This is consistent with other Bearsampp modules (e.g., module-bruno, module-php).
 
 **Example structure in the final archive:**
 ```
 phpmyadmin5.2.1/
 ├── bearsampp.conf
 ├── config.inc.php
+├── index.php
 └── [phpMyAdmin files]
 ```
 
 ### How It Works
 
-1. **Bundle Folder Naming**: The `${bundle.folder}` variable is derived from the bundle path and includes the version:
+1. **Bundle Folder Naming**: The bundle folder is derived from the bundle path and includes the version:
    - Example: `phpmyadmin5.2.1`
 
-2. **Preparation Directory**: Files are copied to `${bundle.tmp.prep.path}/${bundle.folder}`:
-   - This creates: `tmp/phpmyadmin5.2.1/[files]`
+2. **Preparation Directory**: Files are copied to `${bundleTmpPrepPath}/${bundleName}${bundleVersion}`:
+   - This creates: `tmp/bundles_prep/apps/phpmyadmin/phpmyadmin5.2.1/[files]`
 
-3. **Compression**: The build system compresses the entire folder structure, preserving the version folder:
+3. **Compression**: The build system compresses from the parent directory, preserving the version folder:
    - Archive contains: `phpmyadmin5.2.1/` as the root directory
 
 ### Build Process Flow
 
-1. **Version Validation**: Checks if the specified version exists in `bin/` directory
+1. **Version Validation**: Checks if the specified version exists in `bin/` or `bin/archived/` directory
 2. **Preparation**: Creates temporary directory structure with version folder name
 3. **Download**: Fetches phpMyAdmin from:
    - modules-untouched repository (primary)
@@ -39,15 +40,19 @@ phpmyadmin5.2.1/
    - Standard URL format (final fallback)
 4. **Extraction**: Extracts phpMyAdmin archive using 7-Zip
 5. **Configuration**: Copies custom configuration files from `bin/[version]/`
-6. **Archiving**: Creates 7z archive with version folder included
-7. **Hashing**: Generates MD5, SHA1, SHA256, and SHA512 hash files
+6. **Build Copy**: Copies to bundles_build directory (uncompressed for development/testing)
+7. **Archiving**: Creates 7z archive with version folder included
+8. **Hashing**: Generates MD5, SHA1, SHA256, and SHA512 hash files
 
 ## Building a Release
 
 ### Using Gradle
 
 ```bash
-# Build a specific version
+# Build a specific version (interactive mode)
+gradle release
+
+# Build a specific version (non-interactive mode)
 gradle release -PbundleVersion=5.2.1
 
 # Build all available versions
@@ -67,7 +72,7 @@ gradle info
 
 ### Supported Versions
 
-Versions are defined in `releases.properties`. Each entry maps a version to its download URL:
+Versions are defined in `releases.properties` and can also be fetched from the modules-untouched repository. Each entry maps a version to its download URL:
 
 ```properties
 5.2.1 = https://files.phpmyadmin.net/phpMyAdmin/5.2.1/phpMyAdmin-5.2.1-all-languages.7z
@@ -76,7 +81,7 @@ Versions are defined in `releases.properties`. Each entry maps a version to its 
 
 ### Version Folder Structure
 
-Each version has its own folder in `bin/`:
+Each version has its own folder in `bin/` or `bin/archived/`:
 
 ```
 bin/
@@ -86,9 +91,10 @@ bin/
 ├── phpmyadmin5.2.0/
 │   ├── bearsampp.conf
 │   └── config.inc.php
-└── phpmyadmin4.9.10/
-    ├── bearsampp.conf
-    └── config.inc.php
+└── archived/
+    └── phpmyadmin4.9.10/
+        ├── bearsampp.conf
+        └── config.inc.php
 ```
 
 ## Configuration Files
@@ -106,7 +112,7 @@ bundle.format = 7z
 
 ### releases.properties
 
-Maps versions to download URLs for phpMyAdmin releases.
+Maps versions to download URLs for phpMyAdmin releases. This serves as a local fallback when the modules-untouched repository is unavailable.
 
 ## Archive Format
 
@@ -117,8 +123,9 @@ phpmyadmin[VERSION]/
 ├── bearsampp.conf          # Bearsampp configuration
 ├── config.inc.php          # phpMyAdmin configuration
 ├── index.php               # phpMyAdmin entry point
-├── [all phpMyAdmin files]  # Complete phpMyAdmin installation
-└── ...
+├── libraries/              # phpMyAdmin libraries
+├── themes/                 # phpMyAdmin themes
+└── [all phpMyAdmin files]  # Complete phpMyAdmin installation
 ```
 
 ## Comparison with Other Modules
@@ -126,8 +133,8 @@ phpmyadmin[VERSION]/
 This build structure is consistent with other Bearsampp modules:
 
 - **module-bruno**: Uses pure Gradle build with version folder inclusion
+- **module-php**: Uses pure Gradle build with version folder inclusion
 - **module-apache**: Uses similar pattern with version folder inclusion
-- **module-php**: Uses similar pattern with version folder inclusion
 
 All modules ensure the version folder is included in the compressed archive for proper organization and version management within Bearsampp.
 
@@ -135,7 +142,7 @@ All modules ensure the version folder is included in the compressed archive for 
 
 ### Pure Gradle Implementation
 
-- No Ant dependencies required
+- No external dependencies required (except 7-Zip for compression)
 - Modern build system with caching and incremental builds
 - Parallel execution support
 - Better IDE integration
@@ -150,11 +157,41 @@ The build system automatically downloads phpMyAdmin releases from:
 ### Version Folder Inclusion
 
 **Critical**: The build system ensures the version folder is included in the archive. This is verified by:
-- Creating prep directory with version folder: `tmp/prep/phpmyadmin5.2.1/`
+- Creating prep directory with version folder: `tmp/bundles_prep/apps/phpmyadmin/phpmyadmin5.2.1/`
 - Archiving from parent directory to include folder structure
 - Final archive contains: `phpmyadmin5.2.1/[files]`
 
-This matches the pattern used in module-bruno and ensures proper integration with Bearsampp.
+This matches the pattern used in module-bruno and module-php, ensuring proper integration with Bearsampp.
+
+### Interactive and Non-Interactive Modes
+
+The build system supports both interactive and non-interactive modes:
+
+**Interactive Mode**:
+```bash
+gradle release
+```
+- Displays a menu of available versions
+- Allows selection by index or version string
+- Shows version locations (bin/ or bin/archived/)
+
+**Non-Interactive Mode**:
+```bash
+gradle release -PbundleVersion=5.2.1
+```
+- Directly builds the specified version
+- Suitable for CI/CD pipelines
+- No user interaction required
+
+### Build All Versions
+
+Build all available versions with a single command:
+```bash
+gradle releaseAll
+```
+- Builds all versions found in bin/ and bin/archived/
+- Provides summary of successful and failed builds
+- Continues on error to build remaining versions
 
 ## Troubleshooting
 
@@ -162,12 +199,12 @@ This matches the pattern used in module-bruno and ensures proper integration wit
 
 If you get an error about a missing version folder:
 
-1. Check that the version exists in `bin/`:
+1. Check that the version exists in `bin/` or `bin/archived/`:
    ```bash
    gradle listVersions
    ```
 
-2. Verify the version is defined in `releases.properties`:
+2. Verify the version is defined in `releases.properties` or modules-untouched:
    ```bash
    gradle listReleases
    ```
@@ -197,8 +234,8 @@ This checks for:
 To verify the version folder is included in the archive:
 
 ```bash
-# Extract and check structure
-7z l phpmyadmin5.2.1-2025.1.23.7z
+# List archive contents
+7z l bearsampp-phpmyadmin-5.2.1-2025.1.23.7z
 
 # Should show:
 # phpmyadmin5.2.1/
@@ -207,20 +244,64 @@ To verify the version folder is included in the archive:
 # etc.
 ```
 
+### Download Issues
+
+If phpMyAdmin download fails:
+
+1. Check network connectivity
+2. Verify the version exists in modules-untouched:
+   ```bash
+   gradle checkModulesUntouched
+   ```
+3. Add the version to `releases.properties` as a fallback
+4. The build system will automatically try multiple sources
+
+### 7-Zip Not Found
+
+If 7-Zip is not found:
+
+1. Install 7-Zip from https://www.7-zip.org/
+2. Or set the `7Z_HOME` environment variable to your 7-Zip installation directory
+3. Verify installation:
+   ```bash
+   gradle verify
+   ```
+
+## Build Output Structure
+
+### Temporary Build Files
+
+Located in `bearsampp-build/tmp/`:
+
+```
+bearsampp-build/tmp/
+├── downloads/phpmyadmin/          # Downloaded archives (cached)
+│   └── phpMyAdmin-5.2.1-all-languages.7z
+├── extract/phpmyadmin/            # Temporary extraction
+│   └── 5.2.1/
+├── bundles_prep/apps/phpmyadmin/  # Prepared bundles
+│   └── phpmyadmin5.2.1/
+└── bundles_build/apps/phpmyadmin/ # Final uncompressed output
+    └── phpmyadmin5.2.1/
+```
+
+### Final Archives
+
+Located in `bearsampp-build/apps/phpmyadmin/{bundle.release}/`:
+
+```
+bearsampp-build/apps/phpmyadmin/2025.1.23/
+├── bearsampp-phpmyadmin-5.2.1-2025.1.23.7z
+├── bearsampp-phpmyadmin-5.2.1-2025.1.23.7z.md5
+├── bearsampp-phpmyadmin-5.2.1-2025.1.23.7z.sha1
+├── bearsampp-phpmyadmin-5.2.1-2025.1.23.7z.sha256
+└── bearsampp-phpmyadmin-5.2.1-2025.1.23.7z.sha512
+```
+
 ## References
 
 - [Bearsampp Project](https://github.com/bearsampp/bearsampp)
 - [module-bruno build.gradle](https://github.com/Bearsampp/module-bruno/blob/gradle-convert/build.gradle) - Reference implementation
+- [module-php build.gradle](https://github.com/Bearsampp/module-php/blob/gradle-convert/build.gradle) - Reference implementation
 - [phpMyAdmin Official Site](https://www.phpmyadmin.net/)
 - [Gradle Documentation](https://docs.gradle.org/)
-
-## Migration from Ant
-
-This module has been migrated from Ant to pure Gradle. Key changes:
-
-- **No Ant import**: Pure Gradle implementation
-- **Simplified build**: Single build.gradle file
-- **Better performance**: Gradle caching and incremental builds
-- **Modern tooling**: Better IDE support and debugging
-
-The build output and archive structure remain identical to the Ant version, ensuring backward compatibility with Bearsampp.

@@ -43,8 +43,8 @@ gradle info
 ### Documentation
 
 Complete build documentation is available in [.gradle-docs/](.gradle-docs/):
+- [README.md](.gradle-docs/README.md) - Main documentation and quick reference
 - [BUILD.md](.gradle-docs/BUILD.md) - Comprehensive build documentation
-- [GRADLE_MIGRATION.md](.gradle-docs/GRADLE_MIGRATION.md) - Migration details and verification
 - [VERSION_FOLDER_VERIFICATION.md](.gradle-docs/VERSION_FOLDER_VERIFICATION.md) - Version folder inclusion proof
 - [CHANGES.md](.gradle-docs/CHANGES.md) - Summary of all changes
 

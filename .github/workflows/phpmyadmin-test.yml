@@ -1000,10 +1000,22 @@ jobs:
 
           Write-Host "`n=== Test Summary for phpMyAdmin $version ==="
 
-          $phase1_1 = "${{ steps.download-phpmyadmin.outputs.success }}" -eq "true"
-          $phase1_2 = "${{ steps.verify-phpmyadmin.outputs.success }}" -eq "true"
-          $phase2 = "${{ steps.test-basic.outputs.success }}" -eq "true"
-          $phase3 = "${{ steps.test-database.outputs.success }}" -eq "true"
+          # Check phase results - treat empty string as false
+          $phase1_1_output = "${{ steps.download-phpmyadmin.outputs.success }}"
+          $phase1_2_output = "${{ steps.verify-phpmyadmin.outputs.success }}"
+          $phase2_output = "${{ steps.test-basic.outputs.success }}"
+          $phase3_output = "${{ steps.test-database.outputs.success }}"
+          
+          $phase1_1 = $phase1_1_output -eq "true"
+          $phase1_2 = $phase1_2_output -eq "true"
+          $phase2 = $phase2_output -eq "true"
+          $phase3 = $phase3_output -eq "true"
+          
+          Write-Host "Phase outputs:"
+          Write-Host "  Phase 1.1: '$phase1_1_output' -> $phase1_1"
+          Write-Host "  Phase 1.2: '$phase1_2_output' -> $phase1_2"
+          Write-Host "  Phase 2: '$phase2_output' -> $phase2"
+          Write-Host "  Phase 3: '$phase3_output' -> $phase3"
 
           # Get error messages if any
           $error1_1 = "${{ steps.download-phpmyadmin.outputs.error }}"

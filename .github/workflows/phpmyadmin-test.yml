@@ -631,7 +631,6 @@ jobs:
       - name: Phase 3 - Test Database Connectivity
         id: test-database
         if: steps.test-basic.outputs.success == 'true'
-        continue-on-error: true
         run: |
           $ErrorActionPreference = "Stop"
           $phpmyadminPath = "${{ steps.download-phpmyadmin.outputs.phpmyadmin-path }}"
@@ -909,9 +908,10 @@ jobs:
               Write-Host "`n✅ All database tests passed"
               echo "success=true" >> $env:GITHUB_OUTPUT
             } else {
-              Write-Host "`n⚠️  Some database tests failed or were skipped"
-              echo "success=partial" >> $env:GITHUB_OUTPUT
-              echo "error=Some database tests failed or were skipped" >> $env:GITHUB_OUTPUT
+              Write-Host "`n❌ Some database tests failed"
+              echo "success=false" >> $env:GITHUB_OUTPUT
+              echo "error=Some database tests failed" >> $env:GITHUB_OUTPUT
+              exit 1
             }
           } catch {
             Write-Host "❌ Error during database testing: $_"

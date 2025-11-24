@@ -580,25 +580,80 @@ jobs:
             $allFunctional = $true
             $testResults = @()
 
-            # Test 1: Setup MySQL service
-            Write-Host "`nTest 1: Setting up MySQL service..."
+            # Test 1: Download and setup portable MySQL
+            Write-Host "`nTest 1: Setting up portable MySQL..."
             try {
-              # Download and setup MySQL (using Chocolatey for quick setup)
-              Write-Host "Installing MySQL via Chocolatey (this may take 3-5 minutes)..."
-              $chocoOutput = choco install mysql -y --version=8.0.33 --params="/port:3306" 2>&1
-              Write-Host "Chocolatey output: $chocoOutput"
+              $mysqlZip = "mysql-8.0.33-winx64.zip"
+              $mysqlUrl = "https://cdn.mysql.com/archives/mysql-8.0/$mysqlZip"
+              $mysqlDir = "mysql-portable"
               
-              # Wait for MySQL service to start (increased timeout)
-              Write-Host "Waiting for MySQL service to start..."
-              Start-Sleep -Seconds 30
+              Write-Host "Downloading portable MySQL from $mysqlUrl..."
+              Invoke-WebRequest -Uri $mysqlUrl -OutFile $mysqlZip -UseBasicParsing -TimeoutSec 300
               
-              # Check if MySQL service is running
-              $mysqlService = Get-Service -Name "MySQL" -ErrorAction SilentlyContinue
-              if ($mysqlService -and $mysqlService.Status -eq "Running") {
-                Write-Host "✅ MySQL service is running"
+              Write-Host "Extracting MySQL..."
+              Expand-Archive -Path $mysqlZip -DestinationPath $mysqlDir -Force
+              
+              # Find the extracted MySQL directory
+              $mysqlPath = Get-ChildItem -Path $mysqlDir -Directory | Select-Object -First 1
+              $mysqlBin = Join-Path $mysqlPath.FullName "bin"
+              $mysqldExe = Join-Path $mysqlBin "mysqld.exe"
+              $mysqlExe = Join-Path $mysqlBin "mysql.exe"
+              
+              Write-Host "MySQL extracted to: $($mysqlPath.FullName)"
+              
+              # Initialize MySQL data directory
+              Write-Host "Initializing MySQL data directory..."
+              $dataDir = Join-Path $mysqlPath.FullName "data"
+              & $mysqldExe --initialize-insecure --datadir=$dataDir 2>&1 | Out-Null
+              
+              # Start MySQL server
+              Write-Host "Starting MySQL server..."
+              $mysqldJob = Start-Job -ScriptBlock {
+                param($exe, $dataDir)
+                & $exe --datadir=$dataDir --port=3306 --console
+              } -ArgumentList $mysqldExe, $dataDir
+              
+              # Wait for MySQL to be ready by checking connection
+              Write-Host "Waiting for MySQL to be ready..."
+              $maxAttempts = 60
+              $attempt = 0
+              $mysqlReady = $false
+              
+              while ($attempt -lt $maxAttempts) {
+                try {
+                  # Try to connect and run a simple query
+                  $testResult = & $mysqlExe -u root --connect-timeout=1 -e "SELECT 1 AS ready;" 2>&1
+                  if ($LASTEXITCODE -eq 0 -and $testResult -match "ready") {
+                    $mysqlReady = $true
+                    Write-Host "MySQL is ready after $attempt attempts"
+                    break
+                  }
+                } catch { }
+                
+                # Check if mysqld job is still running
+                if ($mysqldJob.State -ne "Running") {
+                  Write-Host "MySQL server job stopped unexpectedly"
+                  $jobOutput = Receive-Job -Job $mysqldJob -ErrorAction SilentlyContinue
+                  if ($jobOutput) {
+                    Write-Host "MySQL server output:"
+                    Write-Host $jobOutput
+                  }
+                  break
+                }
+                
+                Start-Sleep -Milliseconds 500
+                $attempt++
+              }
+              
+              if ($mysqlReady) {
+                Write-Host "✅ MySQL server is running"
                 $testResults += "MySQL Service: PASS"
+                
+                # Store paths for later use
+                $script:mysqlExe = $mysqlExe
+                $script:mysqldJob = $mysqldJob
               } else {
-                Write-Host "❌ MySQL service is not running"
+                Write-Host "❌ MySQL server failed to start"
                 $allFunctional = $false
                 $testResults += "MySQL Service: FAIL"
               }
@@ -612,22 +667,14 @@ jobs:
             if ($allFunctional) {
               Write-Host "`nTest 2: Creating test database and user..."
               try {
-                # Set root password and create test database
-                $mysqlExe = "C:\tools\mysql\current\bin\mysql.exe"
-                if (Test-Path $mysqlExe) {
-                  # Create test database
-                  & $mysqlExe -u root -e "CREATE DATABASE IF NOT EXISTS phpmyadmin_test;" 2>&1 | Out-Null
-                  & $mysqlExe -u root -e "CREATE USER IF NOT EXISTS 'pma_test'@'localhost' IDENTIFIED BY 'test_password';" 2>&1 | Out-Null
-                  & $mysqlExe -u root -e "GRANT ALL PRIVILEGES ON phpmyadmin_test.* TO 'pma_test'@'localhost';" 2>&1 | Out-Null
-                  & $mysqlExe -u root -e "FLUSH PRIVILEGES;" 2>&1 | Out-Null
-                  
-                  Write-Host "✅ Test database and user created"
-                  $testResults += "Database Setup: PASS"
-                } else {
-                  Write-Host "❌ MySQL executable not found"
-                  $allFunctional = $false
-                  $testResults += "Database Setup: FAIL"
-                }
+                # Create test database
+                & $script:mysqlExe -u root -e "CREATE DATABASE IF NOT EXISTS phpmyadmin_test;" 2>&1 | Out-Null
+                & $script:mysqlExe -u root -e "CREATE USER IF NOT EXISTS 'pma_test'@'localhost' IDENTIFIED BY 'test_password';" 2>&1 | Out-Null
+                & $script:mysqlExe -u root -e "GRANT ALL PRIVILEGES ON phpmyadmin_test.* TO 'pma_test'@'localhost';" 2>&1 | Out-Null
+                & $script:mysqlExe -u root -e "FLUSH PRIVILEGES;" 2>&1 | Out-Null
+                
+                Write-Host "✅ Test database and user created"
+                $testResults += "Database Setup: PASS"
               } catch {
                 Write-Host "❌ Error creating database: $_"
                 $allFunctional = $false

@@ -455,12 +455,16 @@ jobs:
           Write-Host "=== Phase 1.2: Verify phpMyAdmin Installation ==="
 
           # Check for required files and directories
+          # Note: templates directory is optional for some phpMyAdmin versions
           $requiredItems = @{
             "index.php" = "file"
             "libraries" = "directory"
-            "templates" = "directory"
             "themes" = "directory"
             "vendor" = "directory"
+          }
+          
+          $optionalItems = @{
+            "templates" = "directory"
           }
 
           $allFound = $true
@@ -491,13 +495,29 @@ jobs:
             }
           }
           
+          # Check for optional items
+          foreach ($item in $optionalItems.Keys) {
+            $itemPath = Join-Path $phpmyadminPath $item
+            $itemType = $optionalItems[$item]
+
+            if ($itemType -eq "directory") {
+              if (Test-Path $itemPath -PathType Container) {
+                Write-Host "✅ Found directory: $item (optional)"
+                $verifyResults[$item] = @{ found = $true; path = $itemPath; type = "directory"; optional = $true }
+              } else {
+                Write-Host "ℹ️  $item directory not found (optional)"
+                $verifyResults[$item] = @{ found = $false; type = "directory"; optional = $true }
+              }
+            }
+          }
+          
           # Check for config.sample.inc.php (optional for Bearsampp builds)
           $configSamplePath = Join-Path $phpmyadminPath "config.sample.inc.php"
           if (Test-Path $configSamplePath) {
-            Write-Host "✅ Found file: config.sample.inc.php"
-            $verifyResults["config.sample.inc.php"] = @{ found = $true; path = $configSamplePath; type = "file" }
+            Write-Host "✅ Found file: config.sample.inc.php (optional)"
+            $verifyResults["config.sample.inc.php"] = @{ found = $true; path = $configSamplePath; type = "file"; optional = $true }
           } else {
-            Write-Host "ℹ️  config.sample.inc.php not found (acceptable for Bearsampp builds)"
+            Write-Host "ℹ️  config.sample.inc.php not found (optional)"
             $verifyResults["config.sample.inc.php"] = @{ found = $false; type = "file"; optional = $true }
           }
 

@@ -666,7 +666,14 @@ jobs:
               # Initialize MySQL data directory
               Write-Host "Initializing MySQL data directory..."
               $dataDir = Join-Path $mysqlPath.FullName "data"
-              & $mysqldExe --initialize-insecure --datadir=$dataDir 2>&1 | Out-Null
+              Write-Host "Running: $mysqldExe --initialize-insecure --datadir=$dataDir"
+              $initOutput = & $mysqldExe --initialize-insecure --datadir=$dataDir 2>&1
+              if ($LASTEXITCODE -ne 0) {
+                Write-Host "MySQL initialization output:"
+                Write-Host $initOutput
+                throw "MySQL initialization failed with exit code: $LASTEXITCODE"
+              }
+              Write-Host "✅ MySQL data directory initialized"
               
               # Start MySQL server
               Write-Host "Starting MySQL server..."

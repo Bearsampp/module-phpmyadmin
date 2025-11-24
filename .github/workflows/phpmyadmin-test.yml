@@ -33,6 +33,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Get releases.properties from main branch
+        run: |
+          # Fetch releases.properties from main branch if it doesn't exist in current branch
+          if [ ! -f "releases.properties" ]; then
+            echo "releases.properties not found in current branch, fetching from main..."
+            git fetch origin main:main
+            git checkout main -- releases.properties || echo "Could not fetch releases.properties from main"
+          fi
+
       - name: Get phpMyAdmin Versions
         id: get-versions
         run: |
@@ -44,6 +53,7 @@ jobs:
           get_versions_from_properties() {
             if [ ! -f "releases.properties" ]; then
               echo "❌ ERROR: releases.properties not found"
+              echo "⚠️  Make sure releases.properties exists in the main branch"
               exit 1
             fi
 
@@ -227,6 +237,23 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Get releases.properties from main branch
+        shell: pwsh
+        run: |
+          # Fetch releases.properties from main branch if it doesn't exist in current branch
+          if (-not (Test-Path "releases.properties")) {
+            Write-Host "releases.properties not found in current branch, fetching from main..."
+            git fetch origin main:main
+            git checkout main -- releases.properties
+            if (Test-Path "releases.properties") {
+              Write-Host "✅ Successfully fetched releases.properties from main"
+            } else {
+              Write-Host "❌ Could not fetch releases.properties from main"
+            }
+          } else {
+            Write-Host "✅ releases.properties found in current branch"
+          }
 
       - name: Create test directory
         run: |

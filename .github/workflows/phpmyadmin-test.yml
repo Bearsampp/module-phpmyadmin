@@ -584,11 +584,13 @@ jobs:
             Write-Host "`nTest 1: Setting up MySQL service..."
             try {
               # Download and setup MySQL (using Chocolatey for quick setup)
-              Write-Host "Installing MySQL via Chocolatey..."
-              choco install mysql -y --version=8.0.33 --params="/port:3306" 2>&1 | Out-Null
+              Write-Host "Installing MySQL via Chocolatey (this may take 3-5 minutes)..."
+              $chocoOutput = choco install mysql -y --version=8.0.33 --params="/port:3306" 2>&1
+              Write-Host "Chocolatey output: $chocoOutput"
               
-              # Wait for MySQL service to start
-              Start-Sleep -Seconds 10
+              # Wait for MySQL service to start (increased timeout)
+              Write-Host "Waiting for MySQL service to start..."
+              Start-Sleep -Seconds 30
               
               # Check if MySQL service is running
               $mysqlService = Get-Service -Name "MySQL" -ErrorAction SilentlyContinue
@@ -638,18 +640,18 @@ jobs:
               Write-Host "`nTest 3: Creating phpMyAdmin configuration..."
               try {
                 $configPath = Join-Path $phpmyadminPath "config.inc.php"
-                $configContent = @"
+                $configContent = @'
 <?php
-`$cfg['blowfish_secret'] = 'test-secret-key-for-ci-testing-only';
-`$cfg['Servers'][1]['auth_type'] = 'config';
-`$cfg['Servers'][1]['host'] = 'localhost';
-`$cfg['Servers'][1]['user'] = 'pma_test';
-`$cfg['Servers'][1]['password'] = 'test_password';
-`$cfg['Servers'][1]['AllowNoPassword'] = false;
-`$cfg['DefaultLang'] = 'en';
-`$cfg['ServerDefault'] = 1;
+$cfg['blowfish_secret'] = 'test-secret-key-for-ci-testing-only';
+$cfg['Servers'][1]['auth_type'] = 'config';
+$cfg['Servers'][1]['host'] = 'localhost';
+$cfg['Servers'][1]['user'] = 'pma_test';
+$cfg['Servers'][1]['password'] = 'test_password';
+$cfg['Servers'][1]['AllowNoPassword'] = false;
+$cfg['DefaultLang'] = 'en';
+$cfg['ServerDefault'] = 1;
 ?>
-"@
+'@
                 Set-Content -Path $configPath -Value $configContent
                 
                 if (Test-Path $configPath) {
@@ -792,7 +794,7 @@ jobs:
           $phase1_1 = "${{ steps.download-phpmyadmin.outputs.success }}" -eq "true"
           $phase1_2 = "${{ steps.verify-phpmyadmin.outputs.success }}" -eq "true"
           $phase2 = "${{ steps.test-basic.outputs.success }}" -eq "true"
-          $phase3 = "${{ steps.test-database.outputs.success }}" -eq "true" -or "${{ steps.test-database.outputs.success }}" -eq "partial"
+          $phase3 = "${{ steps.test-database.outputs.success }}" -eq "true"
 
           # Get error messages if any
           $error1_1 = "${{ steps.download-phpmyadmin.outputs.error }}"

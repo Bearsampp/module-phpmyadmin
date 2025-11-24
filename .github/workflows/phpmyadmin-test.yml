@@ -351,9 +351,23 @@ jobs:
 
               # Extract the archive
               Write-Host "Extracting archive..."
-              $extractOutput = & 7z x $downloadPath -o"test-phpmyadmin" -y 2>&1
+              
+              # Check if it's a 7z file and install 7-Zip if needed
+              if ($fileName -match "\.7z$") {
+                Write-Host "Installing 7-Zip..."
+                choco install 7zip -y --no-progress
+                
+                # Refresh environment to get 7z in PATH
+                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+                
+                Write-Host "Extracting 7z archive..."
+                $extractOutput = & 7z x $downloadPath -o"test-phpmyadmin" -y 2>&1
+              } else {
+                Write-Host "Extracting ZIP archive..."
+                $extractOutput = Expand-Archive -Path $downloadPath -DestinationPath "test-phpmyadmin" -Force 2>&1
+              }
 
-              if ($LASTEXITCODE -eq 0) {
+              if ($LASTEXITCODE -eq 0 -or $?) {
                 Write-Host "✅ Extraction successful"
 
                 # List extracted contents

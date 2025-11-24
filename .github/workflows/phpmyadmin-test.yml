@@ -640,18 +640,19 @@ jobs:
               Write-Host "`nTest 3: Creating phpMyAdmin configuration..."
               try {
                 $configPath = Join-Path $phpmyadminPath "config.inc.php"
-                $configContent = @'
-<?php
-$cfg['blowfish_secret'] = 'test-secret-key-for-ci-testing-only';
-$cfg['Servers'][1]['auth_type'] = 'config';
-$cfg['Servers'][1]['host'] = 'localhost';
-$cfg['Servers'][1]['user'] = 'pma_test';
-$cfg['Servers'][1]['password'] = 'test_password';
-$cfg['Servers'][1]['AllowNoPassword'] = false;
-$cfg['DefaultLang'] = 'en';
-$cfg['ServerDefault'] = 1;
-?>
-'@
+                $configLines = @(
+                  "<?php",
+                  "`$cfg['blowfish_secret'] = 'test-secret-key-for-ci-testing-only';",
+                  "`$cfg['Servers'][1]['auth_type'] = 'config';",
+                  "`$cfg['Servers'][1]['host'] = 'localhost';",
+                  "`$cfg['Servers'][1]['user'] = 'pma_test';",
+                  "`$cfg['Servers'][1]['password'] = 'test_password';",
+                  "`$cfg['Servers'][1]['AllowNoPassword'] = false;",
+                  "`$cfg['DefaultLang'] = 'en';",
+                  "`$cfg['ServerDefault'] = 1;",
+                  "?>"
+                )
+                $configContent = $configLines -join "`n"
                 Set-Content -Path $configPath -Value $configContent
                 
                 if (Test-Path $configPath) {

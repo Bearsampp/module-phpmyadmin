@@ -684,30 +684,38 @@ jobs:
               
               # Wait for MySQL to be ready by checking connection
               Write-Host "Waiting for MySQL to be ready..."
-              $maxAttempts = 60
+              $maxAttempts = 120
               $attempt = 0
               $mysqlReady = $false
+              
+              # Give MySQL a few seconds to start before attempting connections
+              Start-Sleep -Seconds 3
               
               while ($attempt -lt $maxAttempts) {
                 try {
                   # Try to connect and run a simple query
-                  $testResult = & $mysqlExe -u root --connect-timeout=1 -e "SELECT 1 AS ready;" 2>&1
+                  $testResult = & $mysqlExe -u root --connect-timeout=2 -e "SELECT 1 AS ready;" 2>&1
                   if ($LASTEXITCODE -eq 0 -and $testResult -match "ready") {
                     $mysqlReady = $true
-                    Write-Host "MySQL is ready after $attempt attempts"
+                    Write-Host "✅ MySQL is ready after $attempt attempts ($(($attempt * 0.5)) seconds)"
                     break
                   }
                 } catch { }
                 
                 # Check if mysqld job is still running
                 if ($mysqldJob.State -ne "Running") {
-                  Write-Host "MySQL server job stopped unexpectedly"
+                  Write-Host "❌ MySQL server job stopped unexpectedly"
                   $jobOutput = Receive-Job -Job $mysqldJob -ErrorAction SilentlyContinue
                   if ($jobOutput) {
                     Write-Host "MySQL server output:"
                     Write-Host $jobOutput
                   }
                   break
+                }
+                
+                # Show progress every 10 attempts
+                if ($attempt % 10 -eq 0 -and $attempt -gt 0) {
+                  Write-Host "Still waiting... (attempt $attempt/$maxAttempts)"
                 }
                 
                 Start-Sleep -Milliseconds 500

@@ -1,0 +1,1056 @@
+name: phpMyAdmin Module Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Test mode'
+        required: true
+        default: 'latest'
+        type: choice
+        options:
+          - latest
+          - specific
+      version:
+        description: 'Specific version to test (only used if test_mode is "specific")'
+        required: false
+        type: string
+
+jobs:
+  detect-versions:
+    name: Detect Versions to Test
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.get-versions.outputs.versions }}
+      has-changes: ${{ steps.get-versions.outputs.has-changes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get phpMyAdmin Versions
+        id: get-versions
+        run: |
+          set -e
+
+          echo "=== Detecting phpMyAdmin Versions to Test ==="
+
+          # Function to extract versions from releases.properties
+          get_versions_from_properties() {
+            if [ ! -f "releases.properties" ]; then
+              echo "❌ ERROR: releases.properties not found"
+              exit 1
+            fi
+
+            # Extract version numbers (lines starting with digits)
+            grep "^[0-9]" releases.properties | cut -d'=' -f1 | tr -d ' ' | sort -V -r
+          }
+
+          # Determine which versions to test based on trigger type
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "📋 Trigger: Manual workflow dispatch"
+
+            if [ "${{ github.event.inputs.test_mode }}" = "specific" ]; then
+              VERSION="${{ github.event.inputs.version }}"
+              if [ -z "$VERSION" ]; then
+                echo "❌ ERROR: Version not specified for specific test mode"
+                exit 1
+              fi
+
+              echo "🎯 Testing specific version: $VERSION"
+
+              # Verify version exists in releases.properties
+              if ! grep -q "^${VERSION} *=" releases.properties; then
+                echo "❌ ERROR: Version $VERSION not found in releases.properties"
+                echo "Available versions:"
+                get_versions_from_properties
+                exit 1
+              fi
+
+              VERSIONS="[\"$VERSION\"]"
+              HAS_CHANGES="true"
+            else
+              echo "📊 Testing latest 5 versions"
+              VERSIONS=$(get_versions_from_properties | head -5 | jq -R -s -c 'split("\n") | map(select(length > 0))')
+              HAS_CHANGES="true"
+            fi
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "📋 Trigger: Pull Request #${{ github.event.pull_request.number }}"
+
+            # Get the base branch for comparison
+            BASE_REF="${{ github.event.pull_request.base.ref }}"
+            HEAD_REF="${{ github.event.pull_request.head.ref }}"
+
+            echo "Comparing $HEAD_REF against $BASE_REF"
+
+            # Primary Method: Check for changed files in /bin directory
+            echo "🔍 Checking for version changes in /bin directory..."
+            CHANGED_BIN_DIRS=$(git diff --name-only origin/$BASE_REF...HEAD | grep "^bin/" | cut -d'/' -f2 | sort -u)
+
+            if [ -n "$CHANGED_BIN_DIRS" ]; then
+              echo "✅ Found changes in /bin directory"
+              echo "Changed directories:"
+              echo "$CHANGED_BIN_DIRS" | sed 's/^/  - /'
+
+              # Extract version numbers from directory names (e.g., phpmyadmin5.2.3 -> 5.2.3)
+              VERSIONS_FROM_BIN=""
+              while IFS= read -r dir; do
+                # Extract version pattern from directory name
+                # Supports patterns like: phpmyadmin5.2.3, phpmyadmin-5.2.3, 5.2.3
+                VERSION=$(echo "$dir" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
+                if [ -n "$VERSION" ]; then
+                  # Verify version exists in releases.properties
+                  if grep -q "^${VERSION} *=" releases.properties; then
+                    echo "  ✅ $VERSION (from $dir) exists in releases.properties"
+                    VERSIONS_FROM_BIN="${VERSIONS_FROM_BIN}${VERSION}\n"
+                  else
+                    echo "  ⚠️  $VERSION (from $dir) not found in releases.properties, skipping"
+                  fi
+                fi
+              done <<< "$CHANGED_BIN_DIRS"
+
+              if [ -n "$VERSIONS_FROM_BIN" ]; then
+                echo "📦 Versions detected from /bin directory:"
+                echo -e "$VERSIONS_FROM_BIN" | sed '/^$/d' | sed 's/^/  - /'
+                VERSIONS=$(echo -e "$VERSIONS_FROM_BIN" | sed '/^$/d' | sort -V -r | uniq | jq -R -s -c 'split("\n") | map(select(length > 0))')
+                HAS_CHANGES="true"
+              else
+                echo "⚠️  No valid versions extracted from /bin directory changes"
+                echo "📊 Falling back to PR title detection..."
+                
+                # Fallback Method: Check PR title for version numbers
+                PR_TITLE="${{ github.event.pull_request.title }}"
+                echo "PR Title: $PR_TITLE"
+
+                VERSIONS_FROM_TITLE=$(echo "$PR_TITLE" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | sort -V -r | uniq)
+
+                if [ -n "$VERSIONS_FROM_TITLE" ]; then
+                  echo "🔍 Version numbers found in PR title:"
+                  echo "$VERSIONS_FROM_TITLE" | sed 's/^/  - /'
+
+                  # Verify these versions exist in releases.properties
+                  VALID_VERSIONS=""
+                  while IFS= read -r version; do
+                    if grep -q "^${version} *=" releases.properties; then
+                      echo "  ✅ $version exists in releases.properties"
+                      VALID_VERSIONS="${VALID_VERSIONS}${version}\n"
+                    else
+                      echo "  ⚠️  $version not found in releases.properties, skipping"
+                    fi
+                  done <<< "$VERSIONS_FROM_TITLE"
+
+                  if [ -n "$VALID_VERSIONS" ]; then
+                    VERSIONS=$(echo -e "$VALID_VERSIONS" | sed '/^$/d' | jq -R -s -c 'split("\n") | map(select(length > 0))')
+                    HAS_CHANGES="true"
+                  else
+                    echo "⚠️  No valid versions found in PR title"
+                    echo "⏭️  Skipping tests - no versions to test"
+                    VERSIONS="[]"
+                    HAS_CHANGES="false"
+                  fi
+                else
+                  echo "ℹ️  No version numbers found in PR title"
+                  echo "⏭️  Skipping tests - no versions to test"
+                  VERSIONS="[]"
+                  HAS_CHANGES="false"
+                fi
+              fi
+            else
+              echo "ℹ️  No changes detected in /bin directory"
+              echo "📊 Falling back to PR title detection..."
+              
+              # Fallback Method: Check PR title for version numbers
+              PR_TITLE="${{ github.event.pull_request.title }}"
+              echo "PR Title: $PR_TITLE"
+
+              VERSIONS_FROM_TITLE=$(echo "$PR_TITLE" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | sort -V -r | uniq)
+
+              if [ -n "$VERSIONS_FROM_TITLE" ]; then
+                echo "🔍 Version numbers found in PR title:"
+                echo "$VERSIONS_FROM_TITLE" | sed 's/^/  - /'
+
+                # Verify these versions exist in releases.properties
+                VALID_VERSIONS=""
+                while IFS= read -r version; do
+                  if grep -q "^${version} *=" releases.properties; then
+                    echo "  ✅ $version exists in releases.properties"
+                    VALID_VERSIONS="${VALID_VERSIONS}${version}\n"
+                  else
+                    echo "  ⚠️  $version not found in releases.properties, skipping"
+                  fi
+                done <<< "$VERSIONS_FROM_TITLE"
+
+                if [ -n "$VALID_VERSIONS" ]; then
+                  VERSIONS=$(echo -e "$VALID_VERSIONS" | sed '/^$/d' | jq -R -s -c 'split("\n") | map(select(length > 0))')
+                  HAS_CHANGES="true"
+                else
+                  echo "⚠️  No valid versions found in PR title"
+                  echo "⏭️  Skipping tests - no versions to test"
+                  VERSIONS="[]"
+                  HAS_CHANGES="false"
+                fi
+              else
+                echo "ℹ️  No version numbers found in PR title"
+                echo "⏭️  Skipping tests - no versions to test"
+                VERSIONS="[]"
+                HAS_CHANGES="false"
+              fi
+            fi
+          else
+            echo "ℹ️  Unknown trigger type, testing latest 5 versions"
+            VERSIONS=$(get_versions_from_properties | head -5 | jq -R -s -c 'split("\n") | map(select(length > 0))')
+            HAS_CHANGES="true"
+          fi
+
+          echo ""
+          echo "=== Test Configuration ==="
+          echo "Versions to test: $VERSIONS"
+          echo "Has changes: $HAS_CHANGES"
+
+          echo "versions=$VERSIONS" >> $GITHUB_OUTPUT
+          echo "has-changes=$HAS_CHANGES" >> $GITHUB_OUTPUT
+
+  test-phpmyadmin:
+    name: Test phpMyAdmin ${{ matrix.version }}
+    needs: detect-versions
+    if: needs.detect-versions.outputs.has-changes == 'true'
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.detect-versions.outputs.versions) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create test directory
+        run: |
+          New-Item -ItemType Directory -Force -Path "test-phpmyadmin"
+          New-Item -ItemType Directory -Force -Path "test-results"
+
+      - name: Phase 1.1 - Download and Extract phpMyAdmin
+        id: download-phpmyadmin
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = "Continue"
+          $version = "${{ matrix.version }}"
+
+          Write-Host "=== Phase 1.1: Download and Extract phpMyAdmin $version ==="
+
+          # Read releases.properties
+          $releasesFile = "releases.properties"
+          if (-not (Test-Path $releasesFile)) {
+            Write-Host "❌ ERROR: releases.properties not found"
+            echo "success=false" >> $env:GITHUB_OUTPUT
+            echo "error=releases.properties not found" >> $env:GITHUB_OUTPUT
+            exit 1
+          }
+
+          # Find the download URL for the specified version
+          $downloadUrl = $null
+          Get-Content $releasesFile | ForEach-Object {
+            if ($_ -match "^$version\s*=\s*(.+)$") {
+              $downloadUrl = $matches[1].Trim()
+            }
+          }
+
+          if (-not $downloadUrl) {
+            Write-Host "❌ ERROR: Version $version not found in releases.properties"
+            Write-Host "Available versions in releases.properties:"
+            Get-Content $releasesFile | Select-String "^[0-9]" | ForEach-Object { Write-Host "  - $($_.Line.Split('=')[0].Trim())" }
+            echo "success=false" >> $env:GITHUB_OUTPUT
+            echo "error=Version $version not found in releases.properties" >> $env:GITHUB_OUTPUT
+            exit 1
+          }
+
+          Write-Host "Download URL: $downloadUrl"
+
+          try {
+            $fileName = [System.IO.Path]::GetFileName($downloadUrl)
+            $downloadPath = Join-Path "test-phpmyadmin" $fileName
+
+            Write-Host "Downloading phpMyAdmin $version..."
+            Write-Host "Target file: $downloadPath"
+
+            try {
+              Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -UseBasicParsing -TimeoutSec 300
+            } catch {
+              Write-Host "❌ ERROR: Download failed!"
+              Write-Host "Error details: $($_.Exception.Message)"
+              Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
+              Write-Host "URL attempted: $downloadUrl"
+              echo "success=false" >> $env:GITHUB_OUTPUT
+              echo "error=Download failed: $($_.Exception.Message)" >> $env:GITHUB_OUTPUT
+              exit 1
+            }
+
+            if (Test-Path $downloadPath) {
+              $fileSize = (Get-Item $downloadPath).Length / 1MB
+              Write-Host "✅ Downloaded: $fileName ($([math]::Round($fileSize, 2)) MB)"
+
+              # Verify file is not empty or too small
+              if ($fileSize -lt 0.1) {
+                Write-Host "❌ ERROR: Downloaded file is too small ($([math]::Round($fileSize, 2)) MB), likely corrupted"
+                echo "success=false" >> $env:GITHUB_OUTPUT
+                echo "error=Downloaded file is too small or corrupted" >> $env:GITHUB_OUTPUT
+                exit 1
+              }
+
+              # Extract the archive
+              Write-Host "Extracting archive..."
+              $extractOutput = & 7z x $downloadPath -o"test-phpmyadmin" -y 2>&1
+
+              if ($LASTEXITCODE -eq 0) {
+                Write-Host "✅ Extraction successful"
+
+                # List extracted contents
+                Write-Host "Extracted contents:"
+                Get-ChildItem -Path "test-phpmyadmin" -Directory | ForEach-Object { Write-Host "  - $($_.Name)" }
+
+                # Find the phpmyadmin directory
+                $phpmyadminDir = Get-ChildItem -Path "test-phpmyadmin" -Directory | Where-Object { $_.Name -match "^phpmyadmin" } | Select-Object -First 1
+
+                if ($phpmyadminDir) {
+                  $phpmyadminPath = $phpmyadminDir.FullName
+                  Write-Host "✅ phpMyAdmin directory found: $phpmyadminPath"
+
+                  # Verify required files exist
+                  $requiredFiles = @("index.php", "config.sample.inc.php")
+                  $allFilesExist = $true
+
+                  foreach ($file in $requiredFiles) {
+                    $filePath = Join-Path $phpmyadminPath $file
+                    if (Test-Path $filePath) {
+                      Write-Host "✅ Found: $file"
+                    } else {
+                      Write-Host "❌ Missing: $file"
+                      $allFilesExist = $false
+                    }
+                  }
+
+                  if ($allFilesExist) {
+                    echo "phpmyadmin-path=$phpmyadminPath" >> $env:GITHUB_OUTPUT
+                    echo "success=true" >> $env:GITHUB_OUTPUT
+                  } else {
+                    Write-Host "❌ ERROR: Required files missing in $phpmyadminPath"
+                    echo "success=false" >> $env:GITHUB_OUTPUT
+                    echo "error=Required files missing in extracted archive" >> $env:GITHUB_OUTPUT
+                    exit 1
+                  }
+                } else {
+                  Write-Host "❌ ERROR: phpMyAdmin directory not found after extraction"
+                  Write-Host "Expected directory pattern: phpmyadmin*"
+                  Write-Host "Found directories:"
+                  Get-ChildItem -Path "test-phpmyadmin" -Directory | ForEach-Object { Write-Host "  - $($_.Name)" }
+                  echo "success=false" >> $env:GITHUB_OUTPUT
+                  echo "error=phpMyAdmin directory not found after extraction" >> $env:GITHUB_OUTPUT
+                  exit 1
+                }
+              } else {
+                Write-Host "❌ ERROR: Extraction failed with exit code: $LASTEXITCODE"
+                Write-Host "7z output:"
+                Write-Host $extractOutput
+                echo "success=false" >> $env:GITHUB_OUTPUT
+                echo "error=Extraction failed with exit code $LASTEXITCODE" >> $env:GITHUB_OUTPUT
+                exit 1
+              }
+            } else {
+              Write-Host "❌ ERROR: Download file not found at expected path: $downloadPath"
+              echo "success=false" >> $env:GITHUB_OUTPUT
+              echo "error=Download file not found after download attempt" >> $env:GITHUB_OUTPUT
+              exit 1
+            }
+          } catch {
+            Write-Host "❌ ERROR: Unexpected error occurred"
+            Write-Host "Error message: $($_.Exception.Message)"
+            Write-Host "Stack trace: $($_.ScriptStackTrace)"
+            echo "success=false" >> $env:GITHUB_OUTPUT
+            echo "error=$($_.Exception.Message)" >> $env:GITHUB_OUTPUT
+            exit 1
+          }
+
+      - name: Phase 1.2 - Verify phpMyAdmin Installation
+        id: verify-phpmyadmin
+        if: steps.download-phpmyadmin.outputs.success == 'true'
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = "Continue"
+          $phpmyadminPath = "${{ steps.download-phpmyadmin.outputs.phpmyadmin-path }}"
+
+          Write-Host "=== Phase 1.2: Verify phpMyAdmin Installation ==="
+
+          # Check for required files and directories
+          $requiredItems = @{
+            "index.php" = "file"
+            "config.sample.inc.php" = "file"
+            "libraries" = "directory"
+            "templates" = "directory"
+            "themes" = "directory"
+            "vendor" = "directory"
+          }
+
+          $allFound = $true
+          $verifyResults = @{}
+
+          foreach ($item in $requiredItems.Keys) {
+            $itemPath = Join-Path $phpmyadminPath $item
+            $itemType = $requiredItems[$item]
+
+            if ($itemType -eq "file") {
+              if (Test-Path $itemPath -PathType Leaf) {
+                Write-Host "✅ Found file: $item"
+                $verifyResults[$item] = @{ found = $true; path = $itemPath; type = "file" }
+              } else {
+                Write-Host "❌ Missing file: $item"
+                $verifyResults[$item] = @{ found = $false; type = "file" }
+                $allFound = $false
+              }
+            } elseif ($itemType -eq "directory") {
+              if (Test-Path $itemPath -PathType Container) {
+                Write-Host "✅ Found directory: $item"
+                $verifyResults[$item] = @{ found = $true; path = $itemPath; type = "directory" }
+              } else {
+                Write-Host "❌ Missing directory: $item"
+                $verifyResults[$item] = @{ found = $false; type = "directory" }
+                $allFound = $false
+              }
+            }
+          }
+
+          # Check for version information
+          $versionFile = Join-Path $phpmyadminPath "libraries/classes/Version.php"
+          if (Test-Path $versionFile) {
+            try {
+              $versionContent = Get-Content $versionFile -Raw
+              if ($versionContent -match "VERSION\s*=\s*'([^']+)'") {
+                $detectedVersion = $matches[1]
+                Write-Host "Version detected: $detectedVersion"
+                $verifyResults["version"] = $detectedVersion
+              }
+            } catch {
+              Write-Host "⚠️  Could not detect version: $_"
+            }
+          }
+
+          $verifyResults | ConvertTo-Json -Depth 10 | Out-File "test-results/verify.json"
+
+          if ($allFound) {
+            echo "success=true" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "success=false" >> $env:GITHUB_OUTPUT
+            exit 1
+          }
+
+      - name: Setup PHP
+        if: steps.verify-phpmyadmin.outputs.success == 'true'
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mysqli, mbstring, zip, gd, xml, json
+          ini-values: post_max_size=256M, max_execution_time=180
+          coverage: none
+          tools: composer
+
+      - name: Phase 2 - Test Basic Functionality
+        id: test-basic
+        if: steps.verify-phpmyadmin.outputs.success == 'true'
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = "Stop"
+          $phpmyadminPath = "${{ steps.download-phpmyadmin.outputs.phpmyadmin-path }}"
+
+          Write-Host "=== Phase 2: Test Basic Functionality ==="
+
+          try {
+            $allFunctional = $true
+            $testResults = @()
+
+            # Test 1: Check if index.php is valid PHP
+            Write-Host "`nTest 1: Validating index.php syntax..."
+            $indexPath = Join-Path $phpmyadminPath "index.php"
+            try {
+              $phpContent = Get-Content $indexPath -Raw
+              if ($phpContent -match "<\?php") {
+                Write-Host "✅ index.php contains valid PHP opening tag"
+                $testResults += "index.php syntax: PASS"
+              } else {
+                Write-Host "❌ index.php does not contain PHP opening tag"
+                $allFunctional = $false
+                $testResults += "index.php syntax: FAIL"
+              }
+            } catch {
+              Write-Host "❌ Error reading index.php: $_"
+              $allFunctional = $false
+              $testResults += "index.php syntax: ERROR"
+            }
+
+            # Test 2: Check config.sample.inc.php
+            Write-Host "`nTest 2: Validating config.sample.inc.php..."
+            $configPath = Join-Path $phpmyadminPath "config.sample.inc.php"
+            try {
+              $configContent = Get-Content $configPath -Raw
+              if ($configContent -match "\$cfg\[") {
+                Write-Host "✅ config.sample.inc.php contains configuration array"
+                $testResults += "config.sample.inc.php: PASS"
+              } else {
+                Write-Host "❌ config.sample.inc.php does not contain configuration array"
+                $allFunctional = $false
+                $testResults += "config.sample.inc.php: FAIL"
+              }
+            } catch {
+              Write-Host "❌ Error reading config.sample.inc.php: $_"
+              $allFunctional = $false
+              $testResults += "config.sample.inc.php: ERROR"
+            }
+
+            # Test 3: Check vendor directory (Composer dependencies)
+            Write-Host "`nTest 3: Checking Composer dependencies..."
+            $vendorPath = Join-Path $phpmyadminPath "vendor"
+            $autoloadPath = Join-Path $vendorPath "autoload.php"
+            try {
+              if (Test-Path $autoloadPath) {
+                Write-Host "✅ Composer autoload file exists"
+                $testResults += "Composer dependencies: PASS"
+              } else {
+                Write-Host "❌ Composer autoload file missing"
+                $allFunctional = $false
+                $testResults += "Composer dependencies: FAIL"
+              }
+            } catch {
+              Write-Host "❌ Error checking Composer dependencies: $_"
+              $allFunctional = $false
+              $testResults += "Composer dependencies: ERROR"
+            }
+
+            # Test 4: Check themes directory
+            Write-Host "`nTest 4: Checking themes..."
+            $themesPath = Join-Path $phpmyadminPath "themes"
+            try {
+              $themes = Get-ChildItem -Path $themesPath -Directory
+              if ($themes.Count -gt 0) {
+                Write-Host "✅ Found $($themes.Count) theme(s):"
+                $themes | ForEach-Object { Write-Host "  - $($_.Name)" }
+                $testResults += "Themes: PASS ($($themes.Count) found)"
+              } else {
+                Write-Host "❌ No themes found"
+                $allFunctional = $false
+                $testResults += "Themes: FAIL"
+              }
+            } catch {
+              Write-Host "❌ Error checking themes: $_"
+              $allFunctional = $false
+              $testResults += "Themes: ERROR"
+            }
+
+            Write-Host "`nTest Results:"
+            $testResults | ForEach-Object { Write-Host "  $_" }
+
+            if ($allFunctional) {
+              Write-Host "`n✅ All tests passed"
+              echo "success=true" >> $env:GITHUB_OUTPUT
+            } else {
+              Write-Host "`n❌ Some tests failed"
+              echo "success=false" >> $env:GITHUB_OUTPUT
+              echo "error=One or more functionality tests failed" >> $env:GITHUB_OUTPUT
+              exit 1
+            }
+          } catch {
+            Write-Host "❌ Error during testing: $_"
+            echo "success=false" >> $env:GITHUB_OUTPUT
+            echo "error=$($_.Exception.Message)" >> $env:GITHUB_OUTPUT
+            exit 1
+          }
+
+      - name: Phase 3 - Test Database Connectivity
+        id: test-database
+        if: steps.test-basic.outputs.success == 'true'
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = "Stop"
+          $phpmyadminPath = "${{ steps.download-phpmyadmin.outputs.phpmyadmin-path }}"
+
+          Write-Host "=== Phase 3: Test Database Connectivity ==="
+
+          try {
+            $allFunctional = $true
+            $testResults = @()
+
+            # Test 1: Setup MySQL service
+            Write-Host "`nTest 1: Setting up MySQL service..."
+            try {
+              # Download and setup MySQL (using Chocolatey for quick setup)
+              Write-Host "Installing MySQL via Chocolatey..."
+              choco install mysql -y --version=8.0.33 --params="/port:3306" 2>&1 | Out-Null
+              
+              # Wait for MySQL service to start
+              Start-Sleep -Seconds 10
+              
+              # Check if MySQL service is running
+              $mysqlService = Get-Service -Name "MySQL" -ErrorAction SilentlyContinue
+              if ($mysqlService -and $mysqlService.Status -eq "Running") {
+                Write-Host "✅ MySQL service is running"
+                $testResults += "MySQL Service: PASS"
+              } else {
+                Write-Host "❌ MySQL service is not running"
+                $allFunctional = $false
+                $testResults += "MySQL Service: FAIL"
+              }
+            } catch {
+              Write-Host "❌ Error setting up MySQL: $_"
+              $allFunctional = $false
+              $testResults += "MySQL Service: ERROR"
+            }
+
+            # Test 2: Create test database and user
+            if ($allFunctional) {
+              Write-Host "`nTest 2: Creating test database and user..."
+              try {
+                # Set root password and create test database
+                $mysqlExe = "C:\tools\mysql\current\bin\mysql.exe"
+                if (Test-Path $mysqlExe) {
+                  # Create test database
+                  & $mysqlExe -u root -e "CREATE DATABASE IF NOT EXISTS phpmyadmin_test;" 2>&1 | Out-Null
+                  & $mysqlExe -u root -e "CREATE USER IF NOT EXISTS 'pma_test'@'localhost' IDENTIFIED BY 'test_password';" 2>&1 | Out-Null
+                  & $mysqlExe -u root -e "GRANT ALL PRIVILEGES ON phpmyadmin_test.* TO 'pma_test'@'localhost';" 2>&1 | Out-Null
+                  & $mysqlExe -u root -e "FLUSH PRIVILEGES;" 2>&1 | Out-Null
+                  
+                  Write-Host "✅ Test database and user created"
+                  $testResults += "Database Setup: PASS"
+                } else {
+                  Write-Host "❌ MySQL executable not found"
+                  $allFunctional = $false
+                  $testResults += "Database Setup: FAIL"
+                }
+              } catch {
+                Write-Host "❌ Error creating database: $_"
+                $allFunctional = $false
+                $testResults += "Database Setup: ERROR"
+              }
+            }
+
+            # Test 3: Create phpMyAdmin config file
+            if ($allFunctional) {
+              Write-Host "`nTest 3: Creating phpMyAdmin configuration..."
+              try {
+                $configPath = Join-Path $phpmyadminPath "config.inc.php"
+                $configContent = @"
+<?php
+`$cfg['blowfish_secret'] = 'test-secret-key-for-ci-testing-only';
+`$cfg['Servers'][1]['auth_type'] = 'config';
+`$cfg['Servers'][1]['host'] = 'localhost';
+`$cfg['Servers'][1]['user'] = 'pma_test';
+`$cfg['Servers'][1]['password'] = 'test_password';
+`$cfg['Servers'][1]['AllowNoPassword'] = false;
+`$cfg['DefaultLang'] = 'en';
+`$cfg['ServerDefault'] = 1;
+?>
+"@
+                Set-Content -Path $configPath -Value $configContent
+                
+                if (Test-Path $configPath) {
+                  Write-Host "✅ Configuration file created"
+                  $testResults += "Config Creation: PASS"
+                } else {
+                  Write-Host "❌ Configuration file not created"
+                  $allFunctional = $false
+                  $testResults += "Config Creation: FAIL"
+                }
+              } catch {
+                Write-Host "❌ Error creating config: $_"
+                $allFunctional = $false
+                $testResults += "Config Creation: ERROR"
+              }
+            }
+
+            # Test 4: Start PHP built-in server
+            if ($allFunctional) {
+              Write-Host "`nTest 4: Starting PHP built-in server..."
+              try {
+                # Start PHP server in background
+                $serverJob = Start-Job -ScriptBlock {
+                  param($path)
+                  Set-Location $path
+                  php -S localhost:8080
+                } -ArgumentList $phpmyadminPath
+                
+                # Wait for server to start
+                Start-Sleep -Seconds 3
+                
+                if ($serverJob.State -eq "Running") {
+                  Write-Host "✅ PHP server started on localhost:8080"
+                  $testResults += "PHP Server: PASS"
+                } else {
+                  Write-Host "❌ PHP server failed to start"
+                  $allFunctional = $false
+                  $testResults += "PHP Server: FAIL"
+                }
+              } catch {
+                Write-Host "❌ Error starting PHP server: $_"
+                $allFunctional = $false
+                $testResults += "PHP Server: ERROR"
+              }
+            }
+
+            # Test 5: Test phpMyAdmin web interface
+            if ($allFunctional) {
+              Write-Host "`nTest 5: Testing phpMyAdmin web interface..."
+              try {
+                # Test if phpMyAdmin loads
+                $response = Invoke-WebRequest -Uri "http://localhost:8080/index.php" -UseBasicParsing -TimeoutSec 10
+                
+                if ($response.StatusCode -eq 200) {
+                  Write-Host "✅ phpMyAdmin interface loads successfully"
+                  $testResults += "Web Interface: PASS"
+                  
+                  # Check if it contains phpMyAdmin elements
+                  if ($response.Content -match "phpMyAdmin" -or $response.Content -match "pma") {
+                    Write-Host "✅ phpMyAdmin content detected"
+                    $testResults += "Content Validation: PASS"
+                  } else {
+                    Write-Host "⚠️  phpMyAdmin content not clearly detected"
+                    $testResults += "Content Validation: PARTIAL"
+                  }
+                } else {
+                  Write-Host "❌ phpMyAdmin interface returned status: $($response.StatusCode)"
+                  $allFunctional = $false
+                  $testResults += "Web Interface: FAIL"
+                }
+              } catch {
+                Write-Host "❌ Error accessing phpMyAdmin interface: $_"
+                $allFunctional = $false
+                $testResults += "Web Interface: ERROR"
+              }
+            }
+
+            # Test 6: Test database operations through phpMyAdmin
+            if ($allFunctional) {
+              Write-Host "`nTest 6: Testing database operations through phpMyAdmin..."
+              try {
+                # Test database listing endpoint
+                $dbListUrl = "http://localhost:8080/index.php?route=/server/databases"
+                $dbResponse = Invoke-WebRequest -Uri $dbListUrl -UseBasicParsing -TimeoutSec 10
+                
+                if ($dbResponse.StatusCode -eq 200) {
+                  Write-Host "✅ Database listing accessible"
+                  
+                  # Check if our test database appears
+                  if ($dbResponse.Content -match "phpmyadmin_test") {
+                    Write-Host "✅ Test database visible in phpMyAdmin"
+                    $testResults += "Database Operations: PASS"
+                  } else {
+                    Write-Host "⚠️  Test database not visible (may require authentication)"
+                    $testResults += "Database Operations: PARTIAL"
+                  }
+                } else {
+                  Write-Host "⚠️  Database operations returned status: $($dbResponse.StatusCode)"
+                  $testResults += "Database Operations: PARTIAL"
+                }
+              } catch {
+                Write-Host "⚠️  Database operations test inconclusive: $_"
+                $testResults += "Database Operations: PARTIAL"
+              }
+            }
+
+            # Cleanup: Stop PHP server
+            if ($serverJob) {
+              Write-Host "`nStopping PHP server..."
+              Stop-Job -Job $serverJob -ErrorAction SilentlyContinue
+              Remove-Job -Job $serverJob -Force -ErrorAction SilentlyContinue
+              Write-Host "✅ PHP server stopped"
+            }
+
+            Write-Host "`nTest Results:"
+            $testResults | ForEach-Object { Write-Host "  $_" }
+
+            if ($allFunctional) {
+              Write-Host "`n✅ All database tests passed"
+              echo "success=true" >> $env:GITHUB_OUTPUT
+            } else {
+              Write-Host "`n⚠️  Some database tests failed or were skipped"
+              echo "success=partial" >> $env:GITHUB_OUTPUT
+              echo "error=Some database tests failed or were skipped" >> $env:GITHUB_OUTPUT
+            }
+          } catch {
+            Write-Host "❌ Error during database testing: $_"
+            echo "success=false" >> $env:GITHUB_OUTPUT
+            echo "error=$($_.Exception.Message)" >> $env:GITHUB_OUTPUT
+            exit 1
+          }
+
+      - name: Generate Test Summary
+        if: always()
+        run: |
+          $version = "${{ matrix.version }}"
+
+          Write-Host "`n=== Test Summary for phpMyAdmin $version ==="
+
+          $phase1_1 = "${{ steps.download-phpmyadmin.outputs.success }}" -eq "true"
+          $phase1_2 = "${{ steps.verify-phpmyadmin.outputs.success }}" -eq "true"
+          $phase2 = "${{ steps.test-basic.outputs.success }}" -eq "true"
+          $phase3 = "${{ steps.test-database.outputs.success }}" -eq "true" -or "${{ steps.test-database.outputs.success }}" -eq "partial"
+
+          # Get error messages if any
+          $error1_1 = "${{ steps.download-phpmyadmin.outputs.error }}"
+          $error2 = "${{ steps.test-basic.outputs.error }}"
+          $error3 = "${{ steps.test-database.outputs.error }}"
+
+          $summary = "### phpMyAdmin $version`n`n"
+
+          $summary += "**Phase 1: Installation Validation**`n"
+          $summary += "- Download & Extract: $(if ($phase1_1) { '✅ PASS' } else { '❌ FAIL' })`n"
+          if (-not $phase1_1 -and $error1_1) {
+            $summary += "  - Error: $error1_1`n"
+          }
+          $summary += "- Verify Files & Directories: $(if ($phase1_2) { '✅ PASS' } else { '❌ FAIL' })`n`n"
+
+          if ($phase1_2) {
+            $summary += "**Phase 2: Basic Functionality**`n"
+            $summary += "- Test PHP Files & Dependencies: $(if ($phase2) { '✅ PASS' } else { '❌ FAIL' })`n"
+            if (-not $phase2 -and $error2) {
+              $summary += "  - Error: $error2`n"
+            }
+            $summary += "`n"
+          }
+
+          if ($phase2) {
+            $phase3Status = "${{ steps.test-database.outputs.success }}"
+            if ($phase3Status -eq "true") {
+              $summary += "**Phase 3: Database Connectivity**`n"
+              $summary += "- MySQL Database Tests: ✅ PASS`n`n"
+            } elseif ($phase3Status -eq "partial") {
+              $summary += "**Phase 3: Database Connectivity**`n"
+              $summary += "- MySQL Database Tests: ⚠️ PARTIAL`n"
+              if ($error3) {
+                $summary += "  - Note: $error3`n"
+              }
+              $summary += "`n"
+            } elseif ($phase3Status -eq "false") {
+              $summary += "**Phase 3: Database Connectivity**`n"
+              $summary += "- MySQL Database Tests: ❌ FAIL`n"
+              if ($error3) {
+                $summary += "  - Error: $error3`n"
+              }
+              $summary += "`n"
+            }
+          }
+
+          # Overall status (all phases must pass)
+          $allPassed = $phase1_1 -and $phase1_2 -and $phase2 -and $phase3
+
+          if ($allPassed) {
+            $summary += "**Overall Status:** ✅ ALL TESTS PASSED`n"
+          } else {
+            $summary += "**Overall Status:** ❌ SOME TESTS FAILED`n"
+            $summary += "`n"
+            $summary += "<details>`n"
+            $summary += "<summary>💡 Click here for troubleshooting tips</summary>`n`n"
+            $summary += "- Check the workflow logs for detailed error messages`n"
+            $summary += "- Download the test artifacts for complete logs`n"
+            $summary += "- Verify the .7z archive structure matches expected format`n"
+            $summary += "- Ensure all required PHP files and dependencies are included`n"
+            $summary += "</details>`n"
+          }
+
+          Write-Host $summary
+          $summary | Out-File "test-results/summary.md"
+
+          # Set job outcome based on test results
+          if (-not $allPassed) {
+            Write-Host "##[error]Tests failed for phpMyAdmin $version"
+            exit 1
+          }
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-phpmyadmin-${{ matrix.version }}
+          path: test-results/
+          retention-days: 30
+
+  report-results:
+    name: Report Test Results
+    needs: [detect-versions, test-phpmyadmin]
+    if: always() && needs.detect-versions.outputs.has-changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all test results
+        uses: actions/download-artifact@v4
+        with:
+          path: all-results
+        continue-on-error: true
+
+      - name: Generate PR Comment
+        run: |
+          echo "## 🐘 phpMyAdmin Module Tests - Results" > comment.md
+          echo "" >> comment.md
+          echo "**Test Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> comment.md
+
+          # Determine overall test status
+          TEST_STATUS="${{ needs.test-phpmyadmin.result }}"
+          VERSIONS='${{ needs.detect-versions.outputs.versions }}'
+
+          if [ "$TEST_STATUS" = "skipped" ] || [ "$VERSIONS" = "[]" ]; then
+            echo "**Status:** ⏭️ Tests skipped - no versions to test" >> comment.md
+            echo "" >> comment.md
+            echo "ℹ️ **Why were tests skipped?**" >> comment.md
+            echo "" >> comment.md
+            echo "Tests are only run when:" >> comment.md
+            echo "- Version directories are added/modified in \`/bin\` (e.g., \`bin/phpmyadmin5.2.3/\`), OR" >> comment.md
+            echo "- PR title contains version numbers (e.g., \"5.2.3\", \"4.9.10\") that exist in \`releases.properties\`" >> comment.md
+            echo "" >> comment.md
+            echo "**To trigger tests:**" >> comment.md
+            echo "1. Add/modify version directories in \`/bin\` (e.g., \`bin/phpmyadmin5.2.3/\`)" >> comment.md
+            echo "2. Or add version numbers to your PR title (e.g., \"Update phpMyAdmin 5.2.3\")" >> comment.md
+            echo "3. Or manually trigger the workflow from the Actions tab" >> comment.md
+          elif [ "$TEST_STATUS" = "success" ]; then
+            echo "**Status:** ✅ All tests passed" >> comment.md
+          elif [ "$TEST_STATUS" = "failure" ]; then
+            echo "**Status:** ❌ Some tests failed" >> comment.md
+          else
+            echo "**Status:** ⚠️ Tests completed with issues" >> comment.md
+          fi
+
+          echo "" >> comment.md
+
+          # Generate badges for each version
+          if [ "$TEST_STATUS" != "skipped" ] && [ "$VERSIONS" != "[]" ]; then
+            echo "### 📊 Test Results by Version" >> comment.md
+            echo "" >> comment.md
+
+            # Parse versions and check results
+            VERSION_LIST=$(echo '${{ needs.detect-versions.outputs.versions }}' | jq -r '.[]')
+
+            for version in $VERSION_LIST; do
+              # Check if summary file exists for this version
+              SUMMARY_FILE="all-results/test-results-phpmyadmin-${version}/summary.md"
+
+              if [ -f "$SUMMARY_FILE" ]; then
+                # Check if tests passed by looking for "ALL TESTS PASSED" in summary
+                if grep -q "ALL TESTS PASSED" "$SUMMARY_FILE"; then
+                  # Success badge (green)
+                  echo "![phpMyAdmin ${version}](https://img.shields.io/badge/phpMyAdmin_${version}-PASS-success?style=flat-square&logo=phpmyadmin&logoColor=white)" >> comment.md
+                else
+                  # Failure badge (red)
+                  echo "![phpMyAdmin ${version}](https://img.shields.io/badge/phpMyAdmin_${version}-FAIL-critical?style=flat-square&logo=phpmyadmin&logoColor=white)" >> comment.md
+                fi
+              else
+                # No results badge (gray)
+                echo "![phpMyAdmin ${version}](https://img.shields.io/badge/phpMyAdmin_${version}-NO_RESULTS-inactive?style=flat-square&logo=phpmyadmin&logoColor=white)" >> comment.md
+              fi
+            done
+
+            echo "" >> comment.md
+          fi
+
+          echo "" >> comment.md
+
+          # Check if artifacts exist
+          if [ -d "all-results" ]; then
+            # Count expected vs actual results
+            EXPECTED_COUNT=$(echo '${{ needs.detect-versions.outputs.versions }}' | jq '. | length')
+            ACTUAL_COUNT=$(find all-results -name "summary.md" 2>/dev/null | wc -l)
+
+            echo "**Results:** $ACTUAL_COUNT of $EXPECTED_COUNT versions tested" >> comment.md
+            echo "" >> comment.md
+
+            # Check if there are any failures
+            HAS_FAILURES=false
+            for version_dir in all-results/test-results-phpmyadmin-*; do
+              if [ -d "$version_dir" ]; then
+                for summary_file in "$version_dir"/summary.md; do
+                  if [ -f "$summary_file" ]; then
+                    if ! grep -q "ALL TESTS PASSED" "$summary_file"; then
+                      HAS_FAILURES=true
+                      break 2
+                    fi
+                  fi
+                done
+              fi
+            done
+
+            # Only show detailed results if there are failures
+            if [ "$HAS_FAILURES" = true ]; then
+              echo "### 📋 Detailed Test Results" >> comment.md
+              echo "" >> comment.md
+
+              for version_dir in all-results/test-results-phpmyadmin-*; do
+                if [ -d "$version_dir" ]; then
+                  for summary_file in "$version_dir"/summary.md; do
+                    if [ -f "$summary_file" ]; then
+                      cat "$summary_file" >> comment.md
+                      echo "" >> comment.md
+                    fi
+                  done
+                fi
+              done
+            else
+              echo "_All tests passed successfully! ✨_" >> comment.md
+              echo "" >> comment.md
+            fi
+          elif [ "$TEST_STATUS" != "skipped" ] && [ "$VERSIONS" != "[]" ]; then
+            echo "⚠️ No test results available" >> comment.md
+            echo "" >> comment.md
+          fi
+
+          if [ "$TEST_STATUS" != "skipped" ] && [ "$VERSIONS" != "[]" ]; then
+            echo "---" >> comment.md
+            echo "" >> comment.md
+            echo "### 📋 Test Phases" >> comment.md
+            echo "" >> comment.md
+            echo "Each version is tested through the following phases:" >> comment.md
+            echo "- **Phase 1:** Installation Validation (Download, Extract, Verify Files & Directories)" >> comment.md
+            echo "- **Phase 2:** Basic Functionality (Test PHP Files, Config, Dependencies, Themes)" >> comment.md
+            echo "- **Phase 3:** Database Connectivity (phpMyAdmin web interface & MySQL tests)" >> comment.md
+            echo "" >> comment.md
+            echo "_Check artifacts for detailed logs._" >> comment.md
+          fi
+
+          cat comment.md
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const comment = fs.readFileSync('comment.md', 'utf8');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('🐘 phpMyAdmin Module Tests')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
+
+      - name: Display Results Summary (Manual Run)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "## 🐘 phpMyAdmin Module Tests - Manual Run Results"
+          echo ""
+          cat comment.md

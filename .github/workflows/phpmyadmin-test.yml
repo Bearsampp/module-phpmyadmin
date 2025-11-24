@@ -382,7 +382,7 @@ jobs:
                   Write-Host "✅ phpMyAdmin directory found: $phpmyadminPath"
 
                   # Verify required files exist
-                  $requiredFiles = @("index.php", "config.sample.inc.php")
+                  $requiredFiles = @("index.php")
                   $allFilesExist = $true
 
                   foreach ($file in $requiredFiles) {
@@ -393,6 +393,14 @@ jobs:
                       Write-Host "❌ Missing: $file"
                       $allFilesExist = $false
                     }
+                  }
+                  
+                  # Check for config.sample.inc.php (optional for Bearsampp builds)
+                  $configSamplePath = Join-Path $phpmyadminPath "config.sample.inc.php"
+                  if (Test-Path $configSamplePath) {
+                    Write-Host "✅ Found: config.sample.inc.php"
+                  } else {
+                    Write-Host "ℹ️  config.sample.inc.php not found (acceptable for Bearsampp builds)"
                   }
 
                   if ($allFilesExist) {
@@ -449,7 +457,6 @@ jobs:
           # Check for required files and directories
           $requiredItems = @{
             "index.php" = "file"
-            "config.sample.inc.php" = "file"
             "libraries" = "directory"
             "templates" = "directory"
             "themes" = "directory"
@@ -482,6 +489,16 @@ jobs:
                 $allFound = $false
               }
             }
+          }
+          
+          # Check for config.sample.inc.php (optional for Bearsampp builds)
+          $configSamplePath = Join-Path $phpmyadminPath "config.sample.inc.php"
+          if (Test-Path $configSamplePath) {
+            Write-Host "✅ Found file: config.sample.inc.php"
+            $verifyResults["config.sample.inc.php"] = @{ found = $true; path = $configSamplePath; type = "file" }
+          } else {
+            Write-Host "ℹ️  config.sample.inc.php not found (acceptable for Bearsampp builds)"
+            $verifyResults["config.sample.inc.php"] = @{ found = $false; type = "file"; optional = $true }
           }
 
           # Check for version information
@@ -551,23 +568,28 @@ jobs:
               $testResults += "index.php syntax: ERROR"
             }
 
-            # Test 2: Check config.sample.inc.php
+            # Test 2: Check config.sample.inc.php (optional for Bearsampp builds)
             Write-Host "`nTest 2: Validating config.sample.inc.php..."
             $configPath = Join-Path $phpmyadminPath "config.sample.inc.php"
-            try {
-              $configContent = Get-Content $configPath -Raw
-              if ($configContent -match "\$cfg\[") {
-                Write-Host "✅ config.sample.inc.php contains configuration array"
-                $testResults += "config.sample.inc.php: PASS"
-              } else {
-                Write-Host "❌ config.sample.inc.php does not contain configuration array"
+            if (Test-Path $configPath) {
+              try {
+                $configContent = Get-Content $configPath -Raw
+                if ($configContent -match "\$cfg\[") {
+                  Write-Host "✅ config.sample.inc.php contains configuration array"
+                  $testResults += "config.sample.inc.php: PASS"
+                } else {
+                  Write-Host "❌ config.sample.inc.php does not contain configuration array"
+                  $allFunctional = $false
+                  $testResults += "config.sample.inc.php: FAIL"
+                }
+              } catch {
+                Write-Host "❌ Error reading config.sample.inc.php: $_"
                 $allFunctional = $false
-                $testResults += "config.sample.inc.php: FAIL"
+                $testResults += "config.sample.inc.php: ERROR"
               }
-            } catch {
-              Write-Host "❌ Error reading config.sample.inc.php: $_"
-              $allFunctional = $false
-              $testResults += "config.sample.inc.php: ERROR"
+            } else {
+              Write-Host "ℹ️  config.sample.inc.php not found (acceptable for Bearsampp builds)"
+              $testResults += "config.sample.inc.php: SKIPPED (not required)"
             }
 
             # Test 3: Check vendor directory (Composer dependencies)

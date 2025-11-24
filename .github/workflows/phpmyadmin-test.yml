@@ -237,6 +237,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Get releases.properties from main branch
         shell: pwsh
@@ -244,10 +246,11 @@ jobs:
           # Fetch releases.properties from main branch if it doesn't exist in current branch
           if (-not (Test-Path "releases.properties")) {
             Write-Host "releases.properties not found in current branch, fetching from main..."
-            git fetch origin main:main
-            git checkout main -- releases.properties
+            git fetch origin main
+            git show origin/main:releases.properties > releases.properties
             if (Test-Path "releases.properties") {
               Write-Host "✅ Successfully fetched releases.properties from main"
+              Get-Content releases.properties | Select-Object -First 5
             } else {
               Write-Host "❌ Could not fetch releases.properties from main"
             }

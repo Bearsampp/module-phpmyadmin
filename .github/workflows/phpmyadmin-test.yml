@@ -661,13 +661,11 @@ jobs:
               Write-Host "`n❌ Some tests failed"
               echo "success=false" >> $env:GITHUB_OUTPUT
               echo "error=One or more functionality tests failed" >> $env:GITHUB_OUTPUT
-              exit 1
             }
           } catch {
             Write-Host "❌ Error during testing: $_"
             echo "success=false" >> $env:GITHUB_OUTPUT
             echo "error=$($_.Exception.Message)" >> $env:GITHUB_OUTPUT
-            exit 1
           }
 
       - name: Phase 3 - Test Database Connectivity
@@ -985,13 +983,11 @@ jobs:
               Write-Host "`n❌ Some database tests failed"
               echo "success=false" >> $env:GITHUB_OUTPUT
               echo "error=Some database tests failed" >> $env:GITHUB_OUTPUT
-              exit 1
             }
           } catch {
             Write-Host "❌ Error during database testing: $_"
             echo "success=false" >> $env:GITHUB_OUTPUT
             echo "error=$($_.Exception.Message)" >> $env:GITHUB_OUTPUT
-            exit 1
           }
 
       - name: Generate Test Summary

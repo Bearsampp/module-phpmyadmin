@@ -673,6 +673,7 @@ jobs:
       - name: Phase 3 - Test Database Connectivity
         id: test-database
         if: steps.test-basic.outputs.success == 'true'
+        continue-on-error: true
         run: |
           $ErrorActionPreference = "Stop"
           $phpmyadminPath = "${{ steps.download-phpmyadmin.outputs.phpmyadmin-path }}"

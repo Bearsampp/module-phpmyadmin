@@ -678,17 +678,28 @@ jobs:
                 $serverJob = Start-Job -ScriptBlock {
                   param($path)
                   Set-Location $path
-                  php -S localhost:8080
+                  php -S localhost:8080 2>&1
                 } -ArgumentList $phpmyadminPath
-                
-                # Wait for server to start
-                Start-Sleep -Seconds 3
-                
-                if ($serverJob.State -eq "Running") {
+
+                # Wait for server readiness with retries
+                $ready = $false
+                for ($i=0; $i -lt 10; $i++) {
+                  Start-Sleep -Seconds 1
+                  try {
+                    $resp = Invoke-WebRequest -Uri "http://localhost:8080/" -UseBasicParsing -TimeoutSec 2
+                    if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500) { $ready = $true; break }
+                  } catch { }
+                  if ($serverJob.State -ne "Running") { break }
+                }
+
+                if ($ready) {
                   Write-Host "✅ PHP server started on localhost:8080"
                   $testResults += "PHP Server: PASS"
                 } else {
-                  Write-Host "❌ PHP server failed to start"
+                  Write-Host "❌ PHP server failed to become ready"
+                  # Fetch job output for diagnostics
+                  $output = Receive-Job -Job $serverJob -Keep -ErrorAction SilentlyContinue
+                  if ($output) { Write-Host "Server output:`n$output" }
                   $allFunctional = $false
                   $testResults += "PHP Server: FAIL"
                 }

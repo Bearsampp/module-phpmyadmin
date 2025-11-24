@@ -767,42 +767,43 @@ jobs:
                 # Generate a proper blowfish secret (32 characters)
                 $blowfishSecret = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 32 | ForEach-Object {[char]$_})
                 
-                $configContent = @"
-<?php
-/* CI/CD Test Configuration */
-`$cfg['blowfish_secret'] = '$blowfishSecret';
-
-/* Server configuration */
-`$i = 0;
-`$i++;
-`$cfg['Servers'][`$i]['auth_type'] = 'config';
-`$cfg['Servers'][`$i]['host'] = '127.0.0.1';
-`$cfg['Servers'][`$i]['port'] = '3306';
-`$cfg['Servers'][`$i]['connect_type'] = 'tcp';
-`$cfg['Servers'][`$i]['compress'] = false;
-`$cfg['Servers'][`$i]['AllowNoPassword'] = true;
-`$cfg['Servers'][`$i]['user'] = 'root';
-`$cfg['Servers'][`$i]['password'] = '';
-
-/* phpMyAdmin configuration storage settings */
-`$cfg['Servers'][`$i]['pmadb'] = 'phpmyadmin_test';
-`$cfg['Servers'][`$i]['controluser'] = 'pma_test';
-`$cfg['Servers'][`$i]['controlpass'] = 'test_password';
-
-/* User preferences */
-`$cfg['DefaultLang'] = 'en';
-`$cfg['ServerDefault'] = 1;
-`$cfg['UploadDir'] = '';
-`$cfg['SaveDir'] = '';
-
-/* Disable version check */
-`$cfg['VersionCheck'] = false;
-
-/* Security */
-`$cfg['AllowArbitraryServer'] = false;
-`$cfg['LoginCookieValidity'] = 1440;
-"@
+                # Build config as array of lines
+                $configLines = @()
+                $configLines += "<?php"
+                $configLines += "/* CI/CD Test Configuration */"
+                $configLines += "`$cfg['blowfish_secret'] = '$blowfishSecret';"
+                $configLines += ""
+                $configLines += "/* Server configuration */"
+                $configLines += "`$i = 0;"
+                $configLines += "`$i++;"
+                $configLines += "`$cfg['Servers'][`$i]['auth_type'] = 'config';"
+                $configLines += "`$cfg['Servers'][`$i]['host'] = '127.0.0.1';"
+                $configLines += "`$cfg['Servers'][`$i]['port'] = '3306';"
+                $configLines += "`$cfg['Servers'][`$i]['connect_type'] = 'tcp';"
+                $configLines += "`$cfg['Servers'][`$i]['compress'] = false;"
+                $configLines += "`$cfg['Servers'][`$i]['AllowNoPassword'] = true;"
+                $configLines += "`$cfg['Servers'][`$i]['user'] = 'root';"
+                $configLines += "`$cfg['Servers'][`$i]['password'] = '';"
+                $configLines += ""
+                $configLines += "/* phpMyAdmin configuration storage settings */"
+                $configLines += "`$cfg['Servers'][`$i]['pmadb'] = 'phpmyadmin_test';"
+                $configLines += "`$cfg['Servers'][`$i]['controluser'] = 'pma_test';"
+                $configLines += "`$cfg['Servers'][`$i]['controlpass'] = 'test_password';"
+                $configLines += ""
+                $configLines += "/* User preferences */"
+                $configLines += "`$cfg['DefaultLang'] = 'en';"
+                $configLines += "`$cfg['ServerDefault'] = 1;"
+                $configLines += "`$cfg['UploadDir'] = '';"
+                $configLines += "`$cfg['SaveDir'] = '';"
+                $configLines += ""
+                $configLines += "/* Disable version check */"
+                $configLines += "`$cfg['VersionCheck'] = false;"
+                $configLines += ""
+                $configLines += "/* Security */"
+                $configLines += "`$cfg['AllowArbitraryServer'] = false;"
+                $configLines += "`$cfg['LoginCookieValidity'] = 1440;"
                 
+                $configContent = $configLines -join "`n"
                 Set-Content -Path $configPath -Value $configContent -Encoding UTF8
                 
                 if (Test-Path $configPath) {
